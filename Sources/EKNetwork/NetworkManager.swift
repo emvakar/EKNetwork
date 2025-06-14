@@ -304,7 +304,6 @@ open class NetworkManager: NetworkManaging {
     /// - Returns: Decoded response.
     /// - Throws: Errors if request fails or decoding fails.
     private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
-
         // Construct URLComponents based on baseURL and request path.
         guard var urlComponents = URLComponents(url: baseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
             throw NetworkError.invalidURL
@@ -317,8 +316,11 @@ open class NetworkManager: NetworkManaging {
         guard let url = urlComponents.url else {
             throw NetworkError.invalidURL
         }
-
+        
+        logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public)")
+        
         var urlRequest = URLRequest(url: url)
+        
         urlRequest.httpMethod = request.method.rawValue
 
         // Set headers if provided.
@@ -398,7 +400,7 @@ open class NetworkManager: NetworkManaging {
                 throw NetworkError.unauthorized
             }
             try parseError(response, request, data)
-            logger.info("Request succeeded: \(request.path, privacy: .public)")
+            logger.info("✅ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public) SUCCESS")
             return try JSONDecoder().decode(T.Response.self, from: data)
 
         } catch {
