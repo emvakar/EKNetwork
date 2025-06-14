@@ -139,7 +139,7 @@ public extension NetworkRequest {
     var errorDecoder: ((Data) -> Error?)? { nil }
     /// Default implementation for `allowsRetry` to maintain backward compatibility.
     /// Requests allow retries and token refresh on 401 by default.
-    var allowsRetry: Bool { false }
+    var allowsRetry: Bool { true }
 
 }
 
@@ -239,10 +239,13 @@ public protocol TokenRefreshProvider: AnyObject {
 
 /// Protocol abstraction for NetworkManager to allow mocking and dependency injection.
 public protocol NetworkManaging {
+    
+    var tokenRefresher: TokenRefreshProvider? { get set }
+    
     /// Sends a network request and returns the decoded response.
     /// - Parameter request: The network request to send.
     /// - Returns: A decoded response of type `T.Response`.
-    func send<T: NetworkRequest>(_ request: T) async throws -> T.Response
+    func send<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?) async throws -> T.Response
 }
 
 /// Protocol abstraction for URLSession to allow mocking and dependency injection.
@@ -258,7 +261,7 @@ open class NetworkManager: NetworkManaging {
     private let baseURL: URL
     private let session: URLSessionProtocol
     /// Optional token refresher to handle authentication token renewal.
-    public weak var tokenRefresher: TokenRefreshProvider?
+    public var tokenRefresher: TokenRefreshProvider?
     private let logger: Logger
 
     /// Initializes a `NetworkManager` with the given configuration.
@@ -267,9 +270,8 @@ open class NetworkManager: NetworkManaging {
     ///   - tokenRefresher: Optional token refresher for handling automatic re-authentication (e.g. refresh token logic).
     ///   - session: The `URLSessionProtocol` to use for making requests. Defaults to `URLSession.shared`.
     ///   - loggerSubsystem: The subsystem identifier used for the `Logger` instance. Defaults to "com.yourapp.networking".
-    public init(baseURL: URL, tokenRefresher: TokenRefreshProvider? = nil, session: URLSessionProtocol = URLSession.shared, loggerSubsystem: String = "com.yourapp.networking") {
+    public init(baseURL: URL, session: URLSessionProtocol = URLSession.shared, loggerSubsystem: String = "com.yourapp.networking") {
         self.baseURL = baseURL
-        self.tokenRefresher = tokenRefresher
         self.session = session
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
     }
@@ -278,8 +280,8 @@ open class NetworkManager: NetworkManaging {
     /// - Parameter request: The network request to send.
     /// - Returns: Decoded response of type `T.Response`.
     /// - Throws: Errors encountered during the request or decoding.
-    public func send<T: NetworkRequest>(_ request: T) async throws -> T.Response {
-        return try await performRequest(request, shouldRetry: true, attempt: 0)
+    public func send<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?) async throws -> T.Response {
+        return try await performRequest(request, accessToken: accessToken, shouldRetry: true, attempt: 0)
     }
 
     fileprivate func parseError(_ response: URLResponse, _ request: NetworkRequest, _ data: Data) throws {
@@ -298,7 +300,7 @@ open class NetworkManager: NetworkManaging {
     ///   - attempt: Current retry attempt count.
     /// - Returns: Decoded response.
     /// - Throws: Errors if request fails or decoding fails.
-    private func performRequest<T: NetworkRequest>(_ request: T, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
+    private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
     
         // Construct URLComponents based on baseURL and request path.
         guard var urlComponents = URLComponents(url: baseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
@@ -321,6 +323,10 @@ open class NetworkManager: NetworkManaging {
             for (key, value) in headers {
                 urlRequest.setValue(value, forHTTPHeaderField: key)
             }
+        }
+        
+        if let accessToken = accessToken?() {
+            urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
         // Set body if provided.
@@ -378,7 +384,7 @@ open class NetworkManager: NetworkManaging {
                 // Check if the request allows retry and if retries are allowed for this attempt.
                 if request.allowsRetry, shouldRetry {
                     try await refreshTokenIfNeeded()
-                    return try await performRequest(request, shouldRetry: false, attempt: attempt)
+                    return try await performRequest(request, accessToken: accessToken, shouldRetry: false, attempt: attempt)
                 }
 
                 // Try to decode custom error after token refresh fails or is disabled
@@ -401,7 +407,7 @@ open class NetworkManager: NetworkManaging {
                 // Wait for the specified delay before retrying.
                 try await Task.sleep(nanoseconds: UInt64(request.retryPolicy.delay * 1_000_000_000))
                 // Retry the request with incremented attempt count.
-                return try await performRequest(request, shouldRetry: shouldRetry, attempt: attempt + 1)
+                return try await performRequest(request, accessToken: accessToken, shouldRetry: shouldRetry, attempt: attempt + 1)
             }
             // Log permanent failure and rethrow the error.
             logger.error("Request failed permanently: \(request.path, privacy: .public), error: \(String(describing: error), privacy: .public)")
