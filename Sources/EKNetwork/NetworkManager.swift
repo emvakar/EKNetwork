@@ -11,15 +11,18 @@ import Foundation
 
 /// HTTP methods supported by the network layer.
 public enum HTTPMethod: String {
+
     case get = "GET"
     case post = "POST"
     case put = "PUT"
     case delete = "DELETE"
     case patch = "PATCH"
+
 }
 
 /// Represents multipart form data for file uploads.
 public struct MultipartFormData {
+
     /// Represents a single part in the multipart form data.
     public struct Part {
         /// Name of the form field.
@@ -68,7 +71,7 @@ public struct MultipartFormData {
     public func encodedData() -> Data {
         var result = Data()
         let boundaryPrefix = "--\(boundary)\r\n"
-
+        
         for part in parts {
             result.append(Data(boundaryPrefix.utf8))
             if let filename = part.filename {
@@ -80,7 +83,7 @@ public struct MultipartFormData {
             result.append(part.data)
             result.append("\r\n".data(using: .utf8)!)
         }
-
+        
         result.append("--\(boundary)--\r\n".data(using: .utf8)!)
         return result
     }
@@ -120,10 +123,10 @@ public protocol NetworkRequest {
     var progress: NetworkProgress? { get }
     /// Retry policy to apply for this request.
     var retryPolicy: RetryPolicy { get }
-
+    
     /// Optional custom error decoder to extract server-side error responses.
     var errorDecoder: ((Data) -> Error?)? { get }
-
+    
     /// Should the request allow retries and token refresh on 401 Unauthorized?
     var allowsRetry: Bool { get }
 }
@@ -178,12 +181,13 @@ public struct RequestBody {
         self.content = .stream(stream)
         self.contentType = contentType
     }
+
 }
 
 /// Defines the retry behavior for network requests, including maximum retry attempts,
 /// delay between retries, and a closure to determine if a retry should occur based on the error.
 public struct RetryPolicy {
-    
+
     /// Maximum number of retry attempts.
     public let maxRetryCount: Int
     /// Delay in seconds before retrying a request.
@@ -199,16 +203,16 @@ public struct RetryPolicy {
     public init(maxRetryCount: Int = 1, delay: TimeInterval = 1.0, shouldRetry: @escaping (Error) -> Bool = {
         // Do not retry on known business logic errors or unauthorized access
         if case NetworkError.unauthorized = $0 {
-            return false
-        }
+        return false
+    }
         if let urlError = $0 as? URLError {
-            return urlError.code != .userAuthenticationRequired
-        }
+        return urlError.code != .userAuthenticationRequired
+    }
         // Do not retry errors that are already user-presentable or business-level
         let typeName = String(describing: type(of: $0))
         if typeName.contains("APIError") || typeName.contains("ServerError") || typeName.contains("Business") {
-            return false
-        }
+        return false
+    }
         return true
     }) {
         self.maxRetryCount = maxRetryCount
@@ -218,13 +222,12 @@ public struct RetryPolicy {
 
 }
 
-
 /// Observable object to track progress of network uploads or downloads.
 @MainActor
 public final class NetworkProgress: ObservableObject {
     /// Fraction of task completed, ranging from 0.0 to 1.0.
     @Published public var fractionCompleted: Double = 0.0
-    
+
     /// Initializes a new NetworkProgress instance.
     public init() {}
 }
@@ -239,9 +242,9 @@ public protocol TokenRefreshProvider: AnyObject {
 
 /// Protocol abstraction for NetworkManager to allow mocking and dependency injection.
 public protocol NetworkManaging {
-    
+
     var tokenRefresher: TokenRefreshProvider? { get set }
-    
+
     /// Sends a network request and returns the decoded response.
     /// - Parameter request: The network request to send.
     /// - Returns: A decoded response of type `T.Response`.
@@ -292,7 +295,7 @@ open class NetworkManager: NetworkManaging {
             }
         }
     }
-    
+
     /// Internal method to perform the network request with retry logic.
     /// - Parameters:
     ///   - request: The network request.
@@ -301,7 +304,7 @@ open class NetworkManager: NetworkManaging {
     /// - Returns: Decoded response.
     /// - Throws: Errors if request fails or decoding fails.
     private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
-    
+
         // Construct URLComponents based on baseURL and request path.
         guard var urlComponents = URLComponents(url: baseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
             throw NetworkError.invalidURL
@@ -324,7 +327,7 @@ open class NetworkManager: NetworkManaging {
                 urlRequest.setValue(value, forHTTPHeaderField: key)
             }
         }
-        
+
         if let accessToken = accessToken?() {
             urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
@@ -386,7 +389,7 @@ open class NetworkManager: NetworkManaging {
                     try await refreshTokenIfNeeded()
                     return try await performRequest(request, accessToken: accessToken, shouldRetry: false, attempt: attempt)
                 }
-
+                
                 // Try to decode custom error after token refresh fails or is disabled
                 if let customError = request.errorDecoder?(data) {
                     throw customError
