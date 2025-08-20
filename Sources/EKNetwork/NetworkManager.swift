@@ -197,10 +197,10 @@ public struct RetryPolicy {
 
     /// Initializes a new RetryPolicy.
     /// - Parameters:
-    ///   - maxRetryCount: Maximum number of retries (default is 1).
+    ///   - maxRetryCount: Maximum number of retries (default is 0).
     ///   - delay: Delay between retries in seconds (default is 1.0).
     ///   - shouldRetry: Closure to decide if retry should occur based on error.
-    public init(maxRetryCount: Int = 1, delay: TimeInterval = 1.0, shouldRetry: @escaping (Error) -> Bool = {
+    public init(maxRetryCount: Int = 0, delay: TimeInterval = 1.0, shouldRetry: @escaping (Error) -> Bool = {
         // Do not retry on known business logic errors or unauthorized access
         if case NetworkError.unauthorized = $0 {
         return false
