@@ -287,7 +287,7 @@ open class NetworkManager: NetworkManaging {
         return try await performRequest(request, accessToken: accessToken, shouldRetry: true, attempt: 0)
     }
 
-    fileprivate func parseError(_ response: URLResponse, _ request: NetworkRequest, _ data: Data) throws {
+    fileprivate func parseError(_ response: URLResponse, _ request: any NetworkRequest, _ data: Data) throws {
         // Decode the response data into the expected Response type.
         if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
             if let customError = request.errorDecoder?(data) {
