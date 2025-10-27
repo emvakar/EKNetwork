@@ -8,6 +8,7 @@
 
 - ✅ `async/await` request handling
 - ✅ Strongly-typed, declarative `NetworkRequest` protocol
+- ✅ Dynamic base URL updates at runtime
 - ✅ Multipart form-data uploads (`multipart/form-data`)
 - ✅ Upload progress tracking with SwiftUI compatibility
 - ✅ Built-in retry policy with per-request customization
@@ -136,6 +137,37 @@ struct MyRequest: NetworkRequest {
 ```
 
 Global retry behavior is managed per request — including exponential backoff, selective retries, etc.
+
+---
+
+## 🔗 Dynamic Base URL Updates
+
+You can change the base URL at runtime and all subsequent requests will use the updated URL:
+
+```swift
+let manager = NetworkManager(baseURL: URL(string: "https://api-v1.example.com")!)
+
+// Make requests with v1 API
+let response1 = try await manager.send(SomeRequest())
+
+// Switch to v2 API
+manager.updateBaseURL(URL(string: "https://api-v2.example.com")!)
+
+// All new requests now use v2 API
+let response2 = try await manager.send(SomeRequest())
+
+// You can also read the current base URL
+print(manager.baseURL) // https://api-v2.example.com
+```
+
+**Note:** Changes take effect immediately for new requests. Requests that are already in progress will continue using the old base URL.
+
+**Use Cases:**
+
+- Switching between staging and production environments
+- A/B testing different API endpoints
+- Multi-tenant applications with dynamic API endpoints
+- Failover to backup servers
 
 ---
 

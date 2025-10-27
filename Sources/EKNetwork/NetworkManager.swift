@@ -261,7 +261,9 @@ extension URLSession: URLSessionProtocol {}
 /// Manages network requests, including retries, token refresh, and progress reporting.
 open class NetworkManager: NetworkManaging {
 
-    private let baseURL: URL
+    /// The base URL that all request paths will be appended to.
+    /// Can be changed dynamically using `updateBaseURL(_:)` method.
+    private(set) public var baseURL: URL
     private let session: URLSessionProtocol
     /// Optional token refresher to handle authentication token renewal.
     public var tokenRefresher: TokenRefreshProvider?
@@ -277,6 +279,15 @@ open class NetworkManager: NetworkManaging {
         self.baseURL = baseURL
         self.session = session
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
+    }
+
+    /// Updates the base URL for all subsequent network requests.
+    /// - Parameter newBaseURL: The new base URL to use.
+    /// - Note: This change takes effect immediately for all new requests.
+    ///         Requests that are currently in progress will still use the old base URL.
+    public func updateBaseURL(_ newBaseURL: URL) {
+        logger.info("🔄 [NETWORK] Base URL updated from \(self.baseURL.absoluteString, privacy: .public) to \(newBaseURL.absoluteString, privacy: .public)")
+        self.baseURL = newBaseURL
     }
 
     /// Sends a network request and decodes the response.
