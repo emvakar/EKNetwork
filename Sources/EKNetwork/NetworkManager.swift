@@ -9,6 +9,17 @@
 import os
 import Foundation
 
+private func normalizeHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
+    headers.reduce(into: [String: String]()) { result, element in
+        guard let key = element.key as? String else { return }
+        if let value = element.value as? String {
+            result[key] = value
+        } else {
+            result[key] = String(describing: element.value)
+        }
+    }
+}
+
 /// HTTP methods supported by the network layer.
 public enum HTTPMethod: String {
 
@@ -97,6 +108,52 @@ public enum NetworkError: Error {
     case emptyResponse
     /// Unauthorized access, typically HTTP 401.
     case unauthorized
+    /// Response was missing or of an unexpected type.
+    case invalidResponse
+}
+
+/// Generic HTTP error carrying status code and payload for diagnostics.
+public struct HTTPError: LocalizedError {
+    public let statusCode: Int
+    public let data: Data
+    public let headers: [String: String]
+
+    public init(statusCode: Int, data: Data, headers: [AnyHashable: Any]) {
+        self.statusCode = statusCode
+        self.data = data
+        self.headers = normalizeHeaders(headers)
+    }
+
+    public var errorDescription: String? {
+        "Request failed with status code \(statusCode)"
+    }
+}
+
+/// Convenience response that only exposes the HTTP status code and headers.
+public struct StatusCodeResponse: Decodable, Equatable {
+    public let statusCode: Int
+    public let headers: [String: String]
+
+    public init(statusCode: Int, headers: [AnyHashable: Any]) {
+        self.statusCode = statusCode
+        self.headers = normalizeHeaders(headers)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        statusCode = try container.decode(Int.self, forKey: .statusCode)
+        headers = try container.decodeIfPresent([String: String].self, forKey: .headers) ?? [:]
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case statusCode
+        case headers
+    }
+}
+
+/// Represents an empty payload. Useful for endpoints that only signal success via status code.
+public struct EmptyResponse: Decodable, Equatable {
+    public init() {}
 }
 
 /// Protocol representing a network request.
@@ -129,6 +186,19 @@ public protocol NetworkRequest {
     
     /// Should the request allow retries and token refresh on 401 Unauthorized?
     var allowsRetry: Bool { get }
+
+    /// Decodes the raw response into the associated response type.
+    /// Default implementation handles JSON decoding and empty-response fallbacks.
+    func decodeResponse(data: Data, response: URLResponse) throws -> Response
+
+    /// Optional handler used when the server returns an empty body.
+    var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }
+
+    /// Provides a decoder instance for JSON responses.
+    var jsonDecoder: JSONDecoder { get }
+
+    /// Provides an encoder instance for JSON request bodies.
+    var jsonEncoder: JSONEncoder { get }
 }
 
 /// Default implementation
@@ -143,7 +213,38 @@ public extension NetworkRequest {
     /// Default implementation for `allowsRetry` to maintain backward compatibility.
     /// Requests allow retries and token refresh on 401 by default.
     var allowsRetry: Bool { true }
+    var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { nil }
+    var jsonDecoder: JSONDecoder { JSONDecoder() }
+    var jsonEncoder: JSONEncoder { JSONEncoder() }
 
+    func decodeResponse(data: Data, response: URLResponse) throws -> Response {
+        if data.isEmpty {
+            guard let handler = emptyResponseHandler else {
+                throw NetworkError.emptyResponse
+            }
+            guard let httpResponse = response as? HTTPURLResponse else {
+                throw NetworkError.invalidResponse
+            }
+            return try handler(httpResponse)
+        }
+        return try jsonDecoder.decode(Response.self, from: data)
+    }
+
+}
+
+public extension NetworkRequest where Response == StatusCodeResponse {
+    var emptyResponseHandler: ((HTTPURLResponse) throws -> StatusCodeResponse)? {
+        { StatusCodeResponse(statusCode: $0.statusCode, headers: $0.allHeaderFields) }
+    }
+}
+
+public extension NetworkRequest where Response == EmptyResponse {
+    var emptyResponseHandler: ((HTTPURLResponse) throws -> EmptyResponse)? { { _ in EmptyResponse() } }
+
+    func decodeResponse(data: Data, response: URLResponse) throws -> EmptyResponse {
+        // Ignore server payload; success is considered sufficient.
+        return EmptyResponse()
+    }
 }
 
 /// Represents a request body for a network request, supporting various types including:
@@ -304,6 +405,7 @@ open class NetworkManager: NetworkManaging {
             if let customError = request.errorDecoder?(data) {
                 throw customError
             }
+            throw HTTPError(statusCode: httpResponse.statusCode, data: data, headers: httpResponse.allHeaderFields)
         }
     }
 
@@ -341,7 +443,8 @@ open class NetworkManager: NetworkManaging {
             }
         }
 
-        if let accessToken = accessToken?() {
+        if let accessToken = accessToken?(),
+           urlRequest.value(forHTTPHeaderField: "Authorization") == nil {
             urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
@@ -350,7 +453,7 @@ open class NetworkManager: NetworkManaging {
             var bodyLength: Int?
             switch requestBody.content {
             case .encodable(let encodable):
-                let encoder = JSONEncoder()
+                let encoder = request.jsonEncoder
                 let encodedData = try encoder.encode(AnyEncodable(encodable))
                 urlRequest.httpBody = encodedData
                 bodyLength = encodedData.count
@@ -364,8 +467,10 @@ open class NetworkManager: NetworkManaging {
                 urlRequest.setValue(requestBody.contentType, forHTTPHeaderField: "Content-Type")
                 // do not set bodyLength, as it's unknown for streams
             case .formURLEncoded(let parameters):
-                let query = parameters.map { "\($0.key)=\($0.value)" }.joined(separator: "&")
-                guard let data = query.data(using: .utf8) else { throw NetworkError.invalidURL }
+                var components = URLComponents()
+                components.queryItems = parameters.map { URLQueryItem(name: $0.key, value: $0.value) }
+                guard let query = components.percentEncodedQuery,
+                      let data = query.data(using: .utf8) else { throw NetworkError.invalidURL }
                 urlRequest.httpBody = data
                 bodyLength = data.count
                 urlRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
@@ -411,8 +516,9 @@ open class NetworkManager: NetworkManaging {
                 throw NetworkError.unauthorized
             }
             try parseError(response, request, data)
+            let decoded = try request.decodeResponse(data: data, response: response)
             logger.info("✅ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public) SUCCESS")
-            return try JSONDecoder().decode(T.Response.self, from: data)
+            return decoded
 
         } catch {
             logger.debug("Evaluating retry policy: attempt \(attempt), max \(request.retryPolicy.maxRetryCount)")
@@ -439,8 +545,8 @@ open class NetworkManager: NetworkManaging {
 
 }
 
-/// URLSessionTaskDelegate implementation to report upload progress.
-final class ProgressDelegate: NSObject, URLSessionTaskDelegate {
+/// URLSession delegate implementation to report upload and download progress.
+final class ProgressDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
     
     private let progress: NetworkProgress
 
@@ -452,9 +558,31 @@ final class ProgressDelegate: NSObject, URLSessionTaskDelegate {
 
     /// Delegate method called periodically to report upload progress.
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
         // Update progress on the main thread to keep UI in sync.
         Task { @MainActor in
             self.progress.fractionCompleted = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+        }
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let expected = dataTask.countOfBytesExpectedToReceive
+        guard expected > 0 else { return }
+        let received = dataTask.countOfBytesReceived
+        let fraction = min(Double(received) / Double(expected), 1.0)
+        Task { @MainActor in
+            self.progress.fractionCompleted = fraction
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        guard error == nil else { return }
+        Task { @MainActor in
+            self.progress.fractionCompleted = 1.0
         }
     }
 
