@@ -451,6 +451,12 @@ open class NetworkManager: NetworkManaging {
             urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
+        // Set Accept header to application/json if Content-Type is application/json and Accept is not already set
+        if request.contentType.contains("application/json"),
+           urlRequest.value(forHTTPHeaderField: "Accept") == nil {
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
+
         // Set body if provided.
         if let requestBody = request.body {
             var bodyLength: Int?
