@@ -171,6 +171,8 @@ public protocol NetworkRequest {
     var headers: [String: String]? { get }
     /// Optional query parameters appended to the URL.
     var queryParameters: [String: String]? { get }
+    /// Content-Type header for the request. Defaults to "application/json".
+    var contentType: String { get }
     /// Optional body sent with the request, supporting multiple encodings.
     /// Use `RequestBody` to specify content and content type.
     var body: RequestBody? { get }
@@ -205,6 +207,7 @@ public protocol NetworkRequest {
 public extension NetworkRequest {
     var headers: [String: String]? { nil }
     var queryParameters: [String: String]? { nil }
+    var contentType: String { "application/json" }
     var body: RequestBody? { nil }
     var multipartData: MultipartFormData? { nil }
     var progress: NetworkProgress? { nil }
@@ -457,13 +460,16 @@ open class NetworkManager: NetworkManaging {
                 let encodedData = try encoder.encode(AnyEncodable(encodable))
                 urlRequest.httpBody = encodedData
                 bodyLength = encodedData.count
-                urlRequest.setValue(requestBody.contentType, forHTTPHeaderField: "Content-Type")
+                // Use request.contentType instead of requestBody.contentType for better control
+                urlRequest.setValue(request.contentType, forHTTPHeaderField: "Content-Type")
             case .raw(let data):
                 urlRequest.httpBody = data
                 bodyLength = data.count
+                // For raw data, prefer requestBody.contentType if set, otherwise use request.contentType
                 urlRequest.setValue(requestBody.contentType, forHTTPHeaderField: "Content-Type")
             case .stream(let stream):
                 urlRequest.httpBodyStream = stream
+                // For stream, prefer requestBody.contentType if set, otherwise use request.contentType
                 urlRequest.setValue(requestBody.contentType, forHTTPHeaderField: "Content-Type")
                 // do not set bodyLength, as it's unknown for streams
             case .formURLEncoded(let parameters):
@@ -473,6 +479,7 @@ open class NetworkManager: NetworkManaging {
                       let data = query.data(using: .utf8) else { throw NetworkError.invalidURL }
                 urlRequest.httpBody = data
                 bodyLength = data.count
+                // Form URL encoded always uses application/x-www-form-urlencoded
                 urlRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             }
             // Set Content-Length header when known (except for streams)
