@@ -8,6 +8,183 @@
 
 import os
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// Helper to get EKNetwork version from embedded version file, Bundle, git tag, or fallback
+/// When used as SPM dependency, version matches the package version that was connected
+private enum EKNetworkVersion {
+    private static let cachedVersion: String = {
+        // Priority 1: Embedded version file (built into the package, most reliable for SPM)
+        // This version is set during build from git tag and always matches the connected package version
+        // The Version.swift file is updated automatically from git tag before each release
+        let embeddedVersion = EKNetworkVersionString
+        if !embeddedVersion.isEmpty {
+            return embeddedVersion
+        }
+        
+        // Priority 2: Environment variable (set during build, works for SPM)
+        if let envVersion = ProcessInfo.processInfo.environment["EKNETWORK_VERSION"], !envVersion.isEmpty {
+            return envVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        
+        // Priority 3: Bundle of the framework itself (works for SPM when package has Info.plist)
+        let networkBundle = Bundle(for: NetworkManager.self)
+        
+        // Try CFBundleShortVersionString first
+        if let bundleVersion = networkBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+           !bundleVersion.isEmpty {
+            return bundleVersion
+        }
+        
+        // Try CFBundleVersion
+        if let bundleVersion = networkBundle.object(forInfoDictionaryKey: kCFBundleVersionKey as String) as? String,
+           !bundleVersion.isEmpty {
+            return bundleVersion
+        }
+        
+        // Priority 4: Try to get version from git tag in the framework's directory
+        // This works when framework is used directly (not as SPM dependency)
+        if let frameworkPath = networkBundle.bundlePath as String?,
+           let gitVersion = getGitVersion(from: frameworkPath) {
+            return gitVersion
+        }
+        
+        // Priority 5: Try to get git version from current working directory
+        // (only if framework is in source form, not as SPM dependency)
+        if let gitVersion = getGitVersion(from: nil) {
+            return gitVersion
+        }
+        
+        // Fallback: use embedded version (should always be set)
+        return embeddedVersion
+    }()
+    
+    static var current: String {
+        return cachedVersion
+    }
+    
+    /// Tries to get git version from the framework's directory or current directory
+    private static func getGitVersion(from frameworkPath: String?) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["describe", "--tags", "--abbrev=0"]
+        
+        // If framework path is provided, try to find git repo relative to it
+        if let frameworkPath = frameworkPath {
+            // Navigate to framework's directory and try to find git repo
+            let url = URL(fileURLWithPath: frameworkPath)
+            var currentURL = url
+            
+            // Walk up the directory tree to find .git folder
+            for _ in 0..<10 { // Limit search to 10 levels up
+                let gitPath = currentURL.appendingPathComponent(".git")
+                if FileManager.default.fileExists(atPath: gitPath.path) {
+                    process.currentDirectoryURL = currentURL
+                    break
+                }
+                guard currentURL.pathComponents.count > 1 else { break }
+                currentURL = currentURL.deletingLastPathComponent()
+            }
+        }
+        
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe() // Suppress errors
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            
+            if process.terminationStatus == 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                if let version = String(data: data, encoding: .utf8) {
+                    let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+                    // Remove 'v' prefix if present (e.g., "v1.0.0" -> "1.0.0")
+                    return trimmed.hasPrefix("v") ? String(trimmed.dropFirst()) : trimmed
+                }
+            }
+        } catch {
+            // Silent fail - will use fallback
+        }
+        
+        return nil
+    }
+}
+
+/// Configuration for User-Agent header generation.
+/// Formats the User-Agent string as: `AppName/Version (BundleID; build:BuildNumber; iOS Version) EKNetwork/Version`
+public struct UserAgentConfiguration {
+    /// Application name (e.g., "Cashdesk").
+    public let appName: String
+    /// Application version (e.g., "2.2.0").
+    public let appVersion: String
+    /// Bundle identifier (e.g., "com.taxcom.cashdesk").
+    public let bundleIdentifier: String
+    /// Build number (e.g., "116").
+    public let buildNumber: String
+    /// iOS/OS version (e.g., "17.3.1").
+    public let osVersion: String
+    /// EKNetwork framework version (defaults to embedded version file, which matches the connected SPM package version).
+    public let networkVersion: String
+    
+    /// Initializes a User-Agent configuration.
+    /// - Parameters:
+    ///   - appName: Application name. Defaults to CFBundleName from Bundle.main.
+    ///   - appVersion: Application version. Defaults to CFBundleShortVersionString from Bundle.main.
+    ///   - bundleIdentifier: Bundle identifier. Defaults to CFBundleIdentifier from Bundle.main.
+    ///   - buildNumber: Build number. Defaults to CFBundleVersion from Bundle.main.
+    ///   - osVersion: OS version. Defaults to current system version.
+    ///   - networkVersion: EKNetwork version. Defaults to embedded version file (Version.swift), which always matches the connected SPM package version.
+    public init(
+        appName: String? = nil,
+        appVersion: String? = nil,
+        bundleIdentifier: String? = nil,
+        buildNumber: String? = nil,
+        osVersion: String? = nil,
+        networkVersion: String? = nil
+    ) {
+        let mainBundle = Bundle.main
+        
+        self.appName = appName ?? mainBundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "App"
+        self.appVersion = appVersion ?? mainBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+        self.bundleIdentifier = bundleIdentifier ?? mainBundle.bundleIdentifier ?? "com.unknown.app"
+        self.buildNumber = buildNumber ?? mainBundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        
+        // Get OS version
+        let defaultOSVersion: String
+        #if canImport(UIKit)
+        defaultOSVersion = UIDevice.current.systemVersion
+        #elseif canImport(AppKit)
+        let systemOSVersion = ProcessInfo.processInfo.operatingSystemVersion
+        defaultOSVersion = "\(systemOSVersion.majorVersion).\(systemOSVersion.minorVersion).\(systemOSVersion.patchVersion)"
+        #else
+        defaultOSVersion = ProcessInfo.processInfo.operatingSystemVersionString
+        #endif
+        
+        self.osVersion = osVersion ?? defaultOSVersion
+        
+        // Get EKNetwork version from git tag (with fallback to Bundle)
+        // Priority: 1) provided networkVersion, 2) environment variable EKNETWORK_VERSION, 3) git tag, 4) Bundle
+        self.networkVersion = networkVersion ?? EKNetworkVersion.current
+    }
+    
+    /// Generates the User-Agent string in the format:
+    /// `AppName/Version (BundleID; build:BuildNumber; iOS/iOSVersion) EKNetwork/Version`
+    public func generateUserAgentString() -> String {
+        let platform: String
+        #if canImport(UIKit)
+        platform = "iOS"
+        #elseif canImport(AppKit)
+        platform = "macOS"
+        #else
+        platform = "Unknown"
+        #endif
+        
+        return "\(appName)/\(appVersion) (\(bundleIdentifier); build:\(buildNumber); \(platform) \(osVersion)) EKNetwork/\(networkVersion)"
+    }
+}
 
 private func normalizeHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
     headers.reduce(into: [String: String]()) { result, element in
@@ -371,6 +548,8 @@ open class NetworkManager: NetworkManaging {
     private let session: URLSessionProtocol
     /// Optional token refresher to handle authentication token renewal.
     public var tokenRefresher: TokenRefreshProvider?
+    /// User-Agent configuration. If set, automatically adds User-Agent header to all requests.
+    public var userAgentConfiguration: UserAgentConfiguration?
     private let logger: Logger
 
     /// Initializes a `NetworkManager` with the given configuration.
@@ -379,9 +558,16 @@ open class NetworkManager: NetworkManaging {
     ///   - tokenRefresher: Optional token refresher for handling automatic re-authentication (e.g. refresh token logic).
     ///   - session: The `URLSessionProtocol` to use for making requests. Defaults to `URLSession.shared`.
     ///   - loggerSubsystem: The subsystem identifier used for the `Logger` instance. Defaults to "com.yourapp.networking".
-    public init(baseURL: URL, session: URLSessionProtocol = URLSession.shared, loggerSubsystem: String = "com.yourapp.networking") {
+    ///   - userAgentConfiguration: Optional User-Agent configuration. If provided, User-Agent header will be automatically set for all requests. If nil, User-Agent is not set.
+    public init(
+        baseURL: URL,
+        session: URLSessionProtocol = URLSession.shared,
+        loggerSubsystem: String = "com.yourapp.networking",
+        userAgentConfiguration: UserAgentConfiguration? = nil
+    ) {
         self.baseURL = baseURL
         self.session = session
+        self.userAgentConfiguration = userAgentConfiguration
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
     }
 
@@ -437,7 +623,7 @@ open class NetworkManager: NetworkManaging {
         
         var urlRequest = URLRequest(url: url)
         
-        urlRequest.httpMethod = request.method.rawValue
+        urlRequest.httpMethod = request.method.rawValue.uppercased()
 
         // Set headers if provided.
         if let headers = request.headers {
@@ -455,6 +641,12 @@ open class NetworkManager: NetworkManaging {
         if request.contentType.contains("application/json"),
            urlRequest.value(forHTTPHeaderField: "Accept") == nil {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
+
+        // Set User-Agent header if configured and not already set
+        if let userAgentConfig = userAgentConfiguration,
+           urlRequest.value(forHTTPHeaderField: "User-Agent") == nil {
+            urlRequest.setValue(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
         }
 
         // Set body if provided.
