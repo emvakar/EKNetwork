@@ -11,6 +11,9 @@ import Foundation
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(AppKit)
+import AppKit
+#endif
 
 /// Helper to get EKNetwork version from embedded version file, Bundle, git tag, or fallback
 /// When used as SPM dependency, version matches the package version that was connected
@@ -66,7 +69,9 @@ private enum EKNetworkVersion {
     }
     
     /// Tries to get git version from the framework's directory or current directory
+    /// Note: Only works on macOS and Linux, not available on iOS/watchOS/tvOS
     private static func getGitVersion(from frameworkPath: String?) -> String? {
+        #if os(macOS) || os(Linux)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["describe", "--tags", "--abbrev=0"]
@@ -108,6 +113,7 @@ private enum EKNetworkVersion {
         } catch {
             // Silent fail - will use fallback
         }
+        #endif // os(macOS) || os(Linux)
         
         return nil
     }
@@ -155,6 +161,7 @@ public struct UserAgentConfiguration {
         // Get OS version
         let defaultOSVersion: String
         #if canImport(UIKit)
+        // UIDevice.current.systemVersion is safe to use synchronously in initialization
         defaultOSVersion = UIDevice.current.systemVersion
         #elseif canImport(AppKit)
         let systemOSVersion = ProcessInfo.processInfo.operatingSystemVersion

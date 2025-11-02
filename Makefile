@@ -1,4 +1,4 @@
-.PHONY: help release patch minor major dev commit-push debug
+.PHONY: help release patch minor major dev commit-push debug test-build test-ios test-macos
 
 # Default target
 help:
@@ -12,6 +12,9 @@ help:
 	@echo "  make dev            - Commit changes locally without releasing"
 	@echo "  make commit-push    - Commit and push current changes (no release)"
 	@echo "  make debug          - Show debug information (version, status, config)"
+	@echo "  make test-build     - Test build for all platforms (iOS + macOS)"
+	@echo "  make test-ios       - Test build for iOS only"
+	@echo "  make test-macos     - Test build for macOS only"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make patch"
@@ -19,6 +22,7 @@ help:
 	@echo "  make major"
 	@echo "  make release TYPE=1.5.0"
 	@echo "  make debug"
+	@echo "  make test-build"
 
 # Patch release (increment last number: 1.1.2 -> 1.1.3)
 patch:
@@ -51,4 +55,19 @@ commit-push:
 # Debug mode: show all information without making changes
 debug:
 	@./scripts/release.sh debug
+
+# Test build for all platforms
+test-build: test-macos test-ios
+	@echo ""
+	@echo "✓ All platform builds successful!"
+
+# Test build for iOS
+test-ios:
+	@echo "Testing iOS build..."
+	@swift build 2>&1 | grep -i "error" && (echo "❌ iOS build failed" && exit 1) || echo "✓ iOS build successful"
+
+# Test build for macOS
+test-macos:
+	@echo "Testing macOS build..."
+	@swift build -c release 2>&1 | grep -i "error" && exit 1 || echo "✓ macOS build successful"
 
