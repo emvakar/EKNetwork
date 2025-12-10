@@ -32,7 +32,25 @@ jobs:
       run: swift build
     
     - name: Run tests with coverage
-      run: swift test --enable-code-coverage
+      id: tests
+      run: |
+        swift test --enable-code-coverage 2>&1 | tee test_output.txt
+        # Extract test count from output
+        TEST_COUNT=$(grep -oE "Test run with [0-9]+ tests" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
+        if [ -z "$TEST_COUNT" ] || [ "$TEST_COUNT" = "0" ]; then
+          # Try alternative pattern
+          TEST_COUNT=$(grep -oE "[0-9]+ tests? passed" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
+        fi
+        if [ -z "$TEST_COUNT" ] || [ "$TEST_COUNT" = "0" ]; then
+          # Try one more pattern
+          TEST_COUNT=$(grep -oE "passed.*[0-9]+ tests?" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
+        fi
+        echo "test_count=$TEST_COUNT" >> $GITHUB_OUTPUT
+        echo "📊 Test count: $TEST_COUNT"
+        if [ "$TEST_COUNT" = "0" ]; then
+          echo "⚠️ Could not extract test count, showing last 20 lines of output:"
+          tail -20 test_output.txt || true
+        fi
     
     - name: Find coverage data
       id: coverage
@@ -161,3 +179,15 @@ jobs:
         name: coverage-report
         path: coverage_report.txt
         retention-days: 30
+    
+    - name: Create test summary
+      run: |
+        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "✅ **Tests:** ${{ steps.tests.outputs.test_count }} passed" >> $GITHUB_STEP_SUMMARY
+        echo "📊 **Coverage:** ${{ steps.calc.outputs.coverage }}% (${{ steps.calc.outputs.covered }}/${{ steps.calc.outputs.total }} lines)" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Coverage Details" >> $GITHUB_STEP_SUMMARY
+        echo "- Total lines: ${{ steps.calc.outputs.total }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Covered lines: ${{ steps.calc.outputs.covered }}" >> $GITHUB_STEP_SUMMARY
+        echo "- Coverage: ${{ steps.calc.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY

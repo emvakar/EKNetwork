@@ -7,8 +7,9 @@
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-21%20passed-brightgreen.svg)](Tests)
-[![Code Quality](https://img.shields.io/badge/Code-Quality%20Assured-success.svg)](#)
+[![CI](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml/badge.svg)](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml)
+[![Tests](https://img.shields.io/badge/Tests-115%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.42%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *A lightweight, type-safe HTTP networking library for Swift applications*
 
@@ -86,7 +87,7 @@ struct GetUserRequest: NetworkRequest {
 ```
 
 #### 🧪 Full Test Coverage
-21 tests cover all major use cases, including edge cases.
+115 tests cover all major use cases, including edge cases. Code coverage is 99.42%.
 
 ---
 
@@ -640,7 +641,7 @@ func testSignIn() async throws {
 
 ## 🧪 Testing
 
-EKNetwork has comprehensive test coverage (61 tests) and provides protocols for easy testing:
+EKNetwork has comprehensive test coverage (115 tests, 99.42% code coverage) and provides protocols for easy testing:
 
 - ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH)
 - ✅ Query parameters
