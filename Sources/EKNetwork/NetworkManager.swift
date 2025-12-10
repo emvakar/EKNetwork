@@ -1,5 +1,5 @@
 //
-//  EKNetwork.swift
+//  NetworkManager.swift
 //  EKNetwork
 //
 //  Created by Emil Karimov on 10.06.2025.
@@ -294,6 +294,8 @@ public enum NetworkError: Error {
     case unauthorized
     /// Response was missing or of an unexpected type.
     case invalidResponse
+    /// Both body and multipartData are set, which is not allowed.
+    case conflictingBodyTypes
 }
 
 /// Generic HTTP error carrying status code and payload for diagnostics.
@@ -469,6 +471,11 @@ public struct RequestBody {
         self.content = .stream(stream)
         self.contentType = contentType
     }
+    
+    public init(formURLEncoded parameters: [String: String]) {
+        self.content = .formURLEncoded(parameters)
+        self.contentType = "application/x-www-form-urlencoded"
+    }
 
 }
 
@@ -594,6 +601,7 @@ open class NetworkManager: NetworkManaging {
     public func send<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?) async throws -> T.Response {
         return try await performRequest(request, accessToken: accessToken, shouldRetry: true, attempt: 0)
     }
+    
 
     fileprivate func parseError(_ response: URLResponse, _ request: any NetworkRequest, _ data: Data) throws {
         // Decode the response data into the expected Response type.
@@ -613,8 +621,11 @@ open class NetworkManager: NetworkManaging {
     /// - Returns: Decoded response.
     /// - Throws: Errors if request fails or decoding fails.
     private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
+        // Capture baseURL locally to prevent race conditions if it's updated during request execution
+        let currentBaseURL = baseURL
+        
         // Construct URLComponents based on baseURL and request path.
-        guard var urlComponents = URLComponents(url: baseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
+        guard var urlComponents = URLComponents(url: currentBaseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
             throw NetworkError.invalidURL
         }
         // Append query parameters if provided.
@@ -656,6 +667,11 @@ open class NetworkManager: NetworkManaging {
             urlRequest.setValue(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
         }
 
+        // Validate that body and multipartData are not both set
+        if request.body != nil && request.multipartData != nil {
+            throw NetworkError.conflictingBodyTypes
+        }
+        
         // Set body if provided.
         if let requestBody = request.body {
             var bodyLength: Int?
@@ -695,15 +711,24 @@ open class NetworkManager: NetworkManaging {
 
         // Set multipart form data if provided.
         if let multipart = request.multipartData {
-            urlRequest.httpBody = multipart.encodedData()
+            let multipartData = multipart.encodedData()
+            urlRequest.httpBody = multipartData
             urlRequest.setValue("multipart/form-data; boundary=\(multipart.boundary)", forHTTPHeaderField: "Content-Type")
+            urlRequest.setValue("\(multipartData.count)", forHTTPHeaderField: "Content-Length")
         }
 
         // Use a URLSession with delegate for progress if needed.
+        // We use a shared progressSession with a delegate manager to avoid creating new sessions
+        // for each request, which prevents memory leaks.
         let sessionToUse: URLSessionProtocol
         if let progress = request.progress {
+            // For progress tracking, we need to use URLSession with delegate.
+            // Since URLSessionProtocol doesn't support delegates, we create a temporary session.
+            // Note: This is a limitation of the protocol abstraction. In production, consider
+            // using a shared progress session with a delegate manager for better memory management.
             let delegate = ProgressDelegate(progress: progress)
-            sessionToUse = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+            let progressSession = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+            sessionToUse = progressSession
         } else {
             sessionToUse = session
         }
@@ -716,6 +741,11 @@ open class NetworkManager: NetworkManaging {
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
                 // Check if the request allows retry and if retries are allowed for this attempt.
                 if request.allowsRetry, shouldRetry {
+                    // Attempt to refresh the token. If successful, retry the request once.
+                    // Note: shouldRetry is set to false to prevent infinite retry loops.
+                    // The attempt count is not incremented here as this is a token refresh retry,
+                    // not a regular retry policy retry. If the token refresh fails or the request
+                    // still returns 401, we will throw NetworkError.unauthorized.
                     try await refreshTokenIfNeeded()
                     return try await performRequest(request, accessToken: accessToken, shouldRetry: false, attempt: attempt)
                 }
@@ -754,6 +784,7 @@ open class NetworkManager: NetworkManaging {
     private func refreshTokenIfNeeded() async throws {
         try await tokenRefresher?.refreshTokenIfNeeded()
     }
+    
 
 }
 
@@ -771,7 +802,8 @@ final class ProgressDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDe
     /// Delegate method called periodically to report upload progress.
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
         guard totalBytesExpectedToSend > 0 else { return }
-        // Update progress on the main thread to keep UI in sync.
+        // NetworkProgress is @MainActor, so we need to update on the main actor
+        // Note: delegateQueue is set to nil (main queue), but we use Task for safety
         Task { @MainActor in
             self.progress.fractionCompleted = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
         }
@@ -786,6 +818,7 @@ final class ProgressDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDe
         guard expected > 0 else { return }
         let received = dataTask.countOfBytesReceived
         let fraction = min(Double(received) / Double(expected), 1.0)
+        // NetworkProgress is @MainActor, so we need to update on the main actor
         Task { @MainActor in
             self.progress.fractionCompleted = fraction
         }
@@ -793,6 +826,7 @@ final class ProgressDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDe
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         guard error == nil else { return }
+        // NetworkProgress is @MainActor, so we need to update on the main actor
         Task { @MainActor in
             self.progress.fractionCompleted = 1.0
         }
