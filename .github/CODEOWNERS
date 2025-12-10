@@ -1,0 +1,15 @@
+# Default owners for everything in the repo
+* @emvakar
+
+# Source code
+/Sources/ @emvakar
+
+# Tests
+/Tests/ @emvakar
+
+# Documentation
+*.md @emvakar
+
+# Configuration
+Package.swift @emvakar
+
