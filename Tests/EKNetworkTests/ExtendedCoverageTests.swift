@@ -10,6 +10,10 @@ import Testing
 import Foundation
 @testable import EKNetwork
 
+@Suite("Extended Coverage Tests")
+struct ExtendedCoverageTestSuite {
+}
+
 // MARK: - Additional Edge Cases and Integration Tests
 
 @Test("NetworkManager initializes with default session")

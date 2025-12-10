@@ -10,6 +10,10 @@ import Testing
 import Foundation
 @testable import EKNetwork
 
+@Suite("Additional Coverage Tests")
+struct AdditionalCoverageTestSuite {
+}
+
 // MARK: - UserAgentConfiguration Tests
 
 @MainActor

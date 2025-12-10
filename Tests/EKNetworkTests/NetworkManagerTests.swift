@@ -10,6 +10,10 @@ import Testing
 import Foundation
 @testable import EKNetwork
 
+@Suite("NetworkManager Tests")
+struct NetworkManagerTestSuite {
+}
+
 struct MockResponse: Codable, Equatable {
     let value: String
 }

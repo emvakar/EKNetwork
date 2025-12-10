@@ -10,6 +10,10 @@ import Testing
 import Foundation
 @testable import EKNetwork
 
+@Suite("High Coverage Tests")
+struct HighCoverageTestSuite {
+}
+
 // MARK: - normalizeHeaders Tests
 
 @Test("normalizeHeaders handles non-string values")

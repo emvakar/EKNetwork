@@ -213,7 +213,8 @@ public struct HTTPError: LocalizedError {
 }
 
 /// Convenience response that only exposes the HTTP status code and headers.
-public struct StatusCodeResponse: Decodable, Equatable, Sendable {
+/// Marked as @unchecked Sendable because Dictionary<String, String> is safe for cross-actor use in Swift 6.
+public struct StatusCodeResponse: Decodable, Equatable, @unchecked Sendable {
     public let statusCode: Int
     public let headers: [String: String]
 
@@ -235,7 +236,8 @@ public struct StatusCodeResponse: Decodable, Equatable, Sendable {
 }
 
 /// Represents an empty payload. Useful for endpoints that only signal success via status code.
-public struct EmptyResponse: Decodable, Equatable, Sendable {
+/// Marked as @unchecked Sendable for Swift 6 strict concurrency compatibility.
+public struct EmptyResponse: Decodable, Equatable, @unchecked Sendable {
     public init() {}
 }
 
