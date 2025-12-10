@@ -80,12 +80,7 @@ func testRequestBodyFormURLEncodedEmpty() async throws {
 @Test("MultipartFormData with single part")
 func testMultipartFormDataSinglePart() async throws {
     var multipart = MultipartFormData()
-    let part = MultipartFormData.Part(
-        name: "field",
-        data: "value".data(using: .utf8)!,
-        mimeType: "text/plain"
-    )
-    multipart.addPart(part)
+    multipart.addPart(name: "field", data: "value".data(using: .utf8)!, mimeType: "text/plain")
     let data = multipart.encodedData()
     #expect(!data.isEmpty)
 }
@@ -93,12 +88,7 @@ func testMultipartFormDataSinglePart() async throws {
 @Test("MultipartFormData with special characters in field name")
 func testMultipartFormDataSpecialCharacters() async throws {
     var multipart = MultipartFormData()
-    let part = MultipartFormData.Part(
-        name: "field-name_with.special",
-        data: "value".data(using: .utf8)!,
-        mimeType: "text/plain"
-    )
-    multipart.addPart(part)
+    multipart.addPart(name: "field-name_with.special", data: "value".data(using: .utf8)!, mimeType: "text/plain")
     let data = multipart.encodedData()
     #expect(!data.isEmpty)
 }
@@ -128,11 +118,12 @@ func testHTTPErrorEmptyHeaders() async throws {
     #expect(error.headers.isEmpty)
 }
 
-@Test("HTTPError with nil data")
-func testHTTPErrorNilData() async throws {
-    let error = HTTPError(statusCode: 400, data: nil, headers: ["X-Error": "test"])
+@Test("HTTPError with empty data")
+func testHTTPErrorEmptyData() async throws {
+    let error = HTTPError(statusCode: 400, data: Data(), headers: ["X-Error": "test"])
     #expect(error.statusCode == 400)
     #expect(error.headers["X-Error"] == "test")
+    #expect(error.data.isEmpty)
 }
 
 // MARK: - NetworkProgress Additional Tests
@@ -248,11 +239,16 @@ func testNetworkErrorCasesDistinct() async throws {
     let error3 = NetworkError.unauthorized
     let error4 = NetworkError.conflictingBodyTypes
     
-    // All should be NetworkError type
-    #expect(error1 is NetworkError)
-    #expect(error2 is NetworkError)
-    #expect(error3 is NetworkError)
-    #expect(error4 is NetworkError)
+    // Verify they are distinct cases by checking their string descriptions
+    let desc1 = String(describing: error1)
+    let desc2 = String(describing: error2)
+    let desc3 = String(describing: error3)
+    let desc4 = String(describing: error4)
+    
+    #expect(desc1.contains("invalidURL"))
+    #expect(desc2.contains("invalidResponse"))
+    #expect(desc3.contains("unauthorized"))
+    #expect(desc4.contains("conflictingBodyTypes"))
 }
 
 // MARK: - Integration Tests
