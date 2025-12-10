@@ -23,5 +23,5 @@ let package = Package(
             dependencies: ["EKNetwork"]
         ),
     ],
-    swiftLanguageVersions: [.v6]
+    swiftLanguageModes: [.v6]
 )

@@ -213,7 +213,7 @@ public struct HTTPError: LocalizedError {
 }
 
 /// Convenience response that only exposes the HTTP status code and headers.
-public struct StatusCodeResponse: Decodable, Equatable {
+public struct StatusCodeResponse: Decodable, Equatable, Sendable {
     public let statusCode: Int
     public let headers: [String: String]
 
@@ -235,7 +235,7 @@ public struct StatusCodeResponse: Decodable, Equatable {
 }
 
 /// Represents an empty payload. Useful for endpoints that only signal success via status code.
-public struct EmptyResponse: Decodable, Equatable {
+public struct EmptyResponse: Decodable, Equatable, Sendable {
     public init() {}
 }
 

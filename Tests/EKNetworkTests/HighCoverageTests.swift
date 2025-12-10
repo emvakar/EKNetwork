@@ -114,7 +114,7 @@ func testURLComponentsInvalidQuery() async throws {
         }
     }
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!)
+    _ = NetworkManager(baseURL: URL(string: "https://api.test")!)
     
     // This should still work, but tests the URLComponents path
     class TestProtocol: URLProtocol {
