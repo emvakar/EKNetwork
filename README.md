@@ -1,46 +1,148 @@
-# EKNetwork
+<div align="center">
 
-EKNetwork is a tiny, strongly typed HTTP layer for Swift applications that embraces `async/await`, composable requests, and predictable error handling. It focuses on clear request definitions, ergonomic decoding, and first-class support for modern API scenarios such as token refresh, structured retries, multipart uploads, and progress reporting.
+# 🌐 EKNetwork
 
----
+**A modern, type-safe HTTP networking library for Swift**
 
-## Why EKNetwork?
+[![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/Tests-21%20passed-brightgreen.svg)](Tests)
+[![Code Quality](https://img.shields.io/badge/Code-Quality%20Assured-success.svg)](#)
 
-- Declarative `NetworkRequest` protocol with typed responses
-- Automatic base URL management and runtime switching
-- Request-scoped retry policy and token refresh integration
-- Multipart uploads, raw/stream bodies, and URL-encoded forms
-- Upload **and** download progress reporting via `NetworkProgress`
-- Configurable JSON encoding/decoding per request
-- Built-in helpers for empty and status-code-only endpoints
-- Lightweight logging with `os.Logger`
+*A lightweight, type-safe HTTP networking library for Swift applications*
 
----
+[Features](#-features) • [Installation](#-installation) • [Quick Start](#-quick-start) • [Documentation](#-documentation) • [API Reference](#-api-reference) • [Contributing](#-contributing) • [Support](#-support-project) • [Structure](#-project-structure)
 
-## Installation
+[English](#) | [Русский](README_RU.md)
 
-Add EKNetwork to your package dependencies:
-
-```swift
-.package(url: "https://github.com/your-username/EKNetwork.git", from: "1.0.0")
-```
-
-Then reference the product in the target where you need it:
-
-```swift
-.product(name: "EKNetwork", package: "EKNetwork")
-```
+</div>
 
 ---
 
-## Quick Start
+## ✨ Why EKNetwork?
 
-### 1. Describe a request
+EKNetwork is a modern networking library that combines ease of use with powerful features. It's designed for developers who value type safety, clean code, and modern Swift practices.
+
+### 🎯 Key Features
+
+- **🚀 Type-Safe API** — Full type safety at compile time, no runtime errors
+- **⚡ Async/Await** — Native support for modern Swift concurrency without callback hell
+- **🔄 Automatic Retry** — Flexible retry policy for each request
+- **🔐 Token Refresh** — Automatic token refresh on 401 errors
+- **📊 Progress Tracking** — Track upload and download progress with SwiftUI support
+- **🎨 Flexible Configuration** — Customize JSON encoding/decoding per request
+- **🧪 Testable** — Protocols for easy mocking and testing
+- **📦 Zero Dependencies** — No external dependencies, only Swift standard library
+- **🛡️ Production Ready** — Tested, optimized, and ready for production use
+
+### 💎 What Makes EKNetwork Special?
+
+#### 🎨 Declarative Approach
+Describe requests as Swift types — the compiler will verify your code:
 
 ```swift
 struct SignInRequest: NetworkRequest {
     struct Response: Decodable {
         let token: String
+        let user: User
+    }
+    // ...
+}
+```
+
+#### 🔧 Composition and Reusability
+Easily combine different request types, create base classes for common patterns:
+
+```swift
+protocol AuthenticatedRequest: NetworkRequest {
+    // Common logic for authenticated requests
+}
+```
+
+#### 🛡️ Predictable Error Handling
+Clear error hierarchy with custom error handling:
+
+```swift
+do {
+    let response = try await manager.send(request)
+} catch let error as HTTPError {
+    // Handle HTTP errors
+} catch NetworkError.unauthorized {
+    // Handle authorization
+}
+```
+
+#### ⚡ Minimal Boilerplate
+Write less code, do more. One request = one structure:
+
+```swift
+struct GetUserRequest: NetworkRequest {
+    typealias Response = User
+    var path: String { "/users/\(id)" }
+    var method: HTTPMethod { .get }
+    let id: Int
+}
+```
+
+#### 🧪 Full Test Coverage
+21 tests cover all major use cases, including edge cases.
+
+---
+
+## 📦 Installation
+
+### Swift Package Manager
+
+Add EKNetwork to your project dependencies in `Package.swift`:
+
+```swift
+dependencies: [
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.2.2")
+]
+```
+
+Or via Xcode:
+1. File → Add Packages...
+2. Enter the repository URL
+3. Select version
+
+Then add the product to your target:
+
+```swift
+.target(
+    name: "YourTarget",
+    dependencies: [
+        .product(name: "EKNetwork", package: "EKNetwork")
+    ]
+)
+```
+
+### Requirements
+
+- **Swift**: 6.0+
+- **iOS**: 18.0+
+- **macOS**: 15.0+
+
+---
+
+## 🚀 Quick Start
+
+### 1. Create a Request
+
+```swift
+import EKNetwork
+
+struct SignInRequest: NetworkRequest {
+    struct Response: Decodable {
+        let token: String
+        let user: User
+    }
+    
+    struct User: Decodable {
+        let id: Int
+        let email: String
+        let name: String
     }
 
     let email: String
@@ -50,151 +152,625 @@ struct SignInRequest: NetworkRequest {
     var method: HTTPMethod { .post }
 
     var body: RequestBody? {
-        RequestBody(encodable: ["email": email, "password": password])
+        RequestBody(encodable: [
+            "email": email,
+            "password": password
+        ])
     }
 }
 ```
 
-### 2. Send it
+### 2. Send the Request
 
 ```swift
-let manager = NetworkManager(baseURL: URL(string: "https://example.com")!)
-let response = try await manager.send(SignInRequest(email: "user@example.com",
-                                                    password: "letmein"),
-                                      accessToken: { TokenStore.shared.accessToken })
-print(response.token)
+let manager = NetworkManager(
+    baseURL: URL(string: "https://api.example.com")!
+)
+
+let response = try await manager.send(
+    SignInRequest(
+        email: "user@example.com",
+        password: "securepassword"
+    ),
+    accessToken: { TokenStore.shared.accessToken }
+)
+
+print("Token: \(response.token)")
+print("User: \(response.user.name)")
 ```
 
-If you provide both a manual `Authorization` header and an `accessToken` closure, EKNetwork preserves the header you supplied and skips the automatic `Bearer` injection.
+**That's it!** Just a few lines of code for a full-featured network request with type safety and error handling.
 
 ---
 
-## Handling responses without payloads
+## 📚 Documentation
 
-Some APIs return nothing but a status code. EKNetwork includes helpers for these cases:
+### 📖 API Reference
+
+For complete API documentation, see [API.md](API.md). The API reference includes:
+- Complete method and property documentation
+- Parameter descriptions
+- Usage examples
+- Error handling details
+- Protocol conformances
+
+### Basic Examples
+
+#### Requests with Query Parameters
 
 ```swift
-// Only status code + headers
-struct PingRequest: NetworkRequest {
+struct SearchRequest: NetworkRequest {
+    struct Response: Decodable {
+        let results: [SearchResult]
+        let total: Int
+    }
+    
+    let query: String
+    let page: Int
+    
+    var path: String { "/api/search" }
+    var method: HTTPMethod { .get }
+    
+    var queryParameters: [String: String]? {
+        ["q": query, "page": "\(page)", "limit": "20"]
+    }
+}
+
+let response = try await manager.send(
+    SearchRequest(query: "Swift", page: 1),
+    accessToken: nil
+)
+```
+
+#### File Upload (Multipart)
+
+```swift
+struct UploadAvatarRequest: NetworkRequest {
     typealias Response = StatusCodeResponse
-
-    var path: String { "/ping" }
-    var method: HTTPMethod { .get }
-}
-
-// Truly empty body
-struct LogoutRequest: NetworkRequest {
-    typealias Response = EmptyResponse
-
-    var path: String { "/auth/logout" }
+    
+    let imageData: Data
+    
+    var path: String { "/api/user/avatar" }
     var method: HTTPMethod { .post }
+    
+    var multipartData: MultipartFormData? {
+        var data = MultipartFormData()
+        data.addPart(
+            name: "avatar",
+            data: imageData,
+            mimeType: "image/jpeg",
+            filename: "avatar.jpg"
+        )
+        return data
+    }
 }
+
+let response = try await manager.send(
+    UploadAvatarRequest(imageData: imageData),
+    accessToken: tokenProvider
+)
 ```
 
-Prefer `StatusCodeResponse` when you need to surface headers such as pagination or rate limits, and `EmptyResponse` when success is binary.
-
-Need custom handling? Provide your own fallback:
+#### Progress Tracking
 
 ```swift
-struct CustomRequest: NetworkRequest {
-    struct Response: Decodable { /* ... */ }
-    var path: String { "/custom" }
-    var method: HTTPMethod { .get }
-
-    var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? {
-        { response in throw APIError.empty(status: response.statusCode) }
+@MainActor
+class UploadViewModel: ObservableObject {
+    @Published var uploadProgress: Double = 0.0
+    
+    func uploadFile(_ data: Data) async throws {
+        let progress = NetworkProgress()
+        
+        // Bind progress to UI
+        progress.$fractionCompleted
+            .assign(to: &$uploadProgress)
+        
+        struct UploadRequest: NetworkRequest {
+            typealias Response = StatusCodeResponse
+            var path: String { "/api/upload" }
+            var method: HTTPMethod { .post }
+            var progress: NetworkProgress? { progress }
+            var multipartData: MultipartFormData? {
+                var data = MultipartFormData()
+                data.addPart(name: "file", data: fileData, mimeType: "application/octet-stream")
+                return data
+            }
+        }
+        
+        let manager = NetworkManager(baseURL: baseURL)
+        _ = try await manager.send(UploadRequest(), accessToken: nil)
     }
 }
 ```
 
----
-
-## JSON coding on your terms
-
-Requests and responses can each customize their JSON coders:
+#### Retry Policy
 
 ```swift
-struct AnalyticsRequest: NetworkRequest {
-    struct Body: Encodable { let timestamp: Date }
-    struct Response: Decodable { /* ... */ }
+struct CriticalRequest: NetworkRequest {
+    typealias Response = CriticalData
+    
+    var path: String { "/api/critical" }
+    var method: HTTPMethod { .get }
+    
+    var retryPolicy: RetryPolicy {
+        RetryPolicy(
+            maxRetryCount: 3,
+            delay: 2.0
+        ) { error in
+            // Retry only on network errors
+            if let urlError = error as? URLError {
+                return urlError.code == .timedOut || 
+                       urlError.code == .networkConnectionLost
+            }
+            return false
+        }
+    }
+}
+```
 
-    var path: String { "/events" }
+#### Automatic Token Refresh
+
+```swift
+class TokenManager: TokenRefreshProvider {
+    func refreshTokenIfNeeded() async throws {
+        // Your token refresh logic
+        let refreshRequest = RefreshTokenRequest(
+            refreshToken: TokenStore.shared.refreshToken
+        )
+        let response = try await networkManager.send(refreshRequest, accessToken: nil)
+        TokenStore.shared.accessToken = response.accessToken
+    }
+}
+
+let manager = NetworkManager(baseURL: baseURL)
+manager.tokenRefresher = TokenManager()
+
+// On 401, token will automatically refresh and request will retry
+let response = try await manager.send(
+    ProtectedRequest(),
+    accessToken: { TokenStore.shared.accessToken }
+)
+```
+
+#### Custom Error Handling
+
+```swift
+struct APIRequest: NetworkRequest {
+    typealias Response = APIResponse
+    
+    var path: String { "/api/data" }
+    var method: HTTPMethod { .get }
+    
+    var errorDecoder: ((Data) -> Error?)? {
+        { data in
+            // Decode custom error from server
+            if let apiError = try? JSONDecoder().decode(APIError.self, from: data) {
+                return apiError
+            }
+            return nil
+        }
+    }
+}
+
+struct APIError: Decodable, Error {
+    let code: String
+    let message: String
+}
+```
+
+### Advanced Features
+
+#### Custom JSON Encoders/Decoders
+
+```swift
+struct DateRequest: NetworkRequest {
+    struct Body: Encodable {
+        let timestamp: Date
+        let event: String
+    }
+    
+    struct Response: Decodable {
+        let id: String
+        let createdAt: Date
+    }
+    
+    var path: String { "/api/events" }
     var method: HTTPMethod { .post }
-
+    
     var body: RequestBody? {
-        RequestBody(encodable: Body(timestamp: Date()))
+        RequestBody(encodable: Body(timestamp: Date(), event: "test"))
     }
-
+    
     var jsonEncoder: JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .secondsSince1970
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.keyEncodingStrategy = .convertToSnakeCase
         return encoder
     }
-
+    
     var jsonDecoder: JSONDecoder {
         let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         return decoder
     }
 }
 ```
 
-Every request owns its encoder/decoder pair, so you can align with backend quirks without global state.
-
----
-
-## Bodies, headers, and query helpers
-
-- `RequestBody` supports `.encodable`, `.raw(Data)`, `.stream(InputStream)`, and `.formURLEncoded([String: String])`. URL-encoded data is safely percent-escaped by default.
-- Supply per-request headers and query parameters directly through `headers` and `queryParameters`.
-- For multipart uploads, compose `MultipartFormData` with lightweight `Part` definitions.
-
----
-
-## Retries, errors, and token refresh
-
-- Use `retryPolicy` to configure per-request retry limits, delays, and retry predicates.
-- Plug in a `TokenRefreshProvider` to automatically refresh tokens after a `401` response. Requests opt in via `allowsRetry`.
-- Non-success HTTP responses throw `HTTPError`, containing the status code, normalized headers, and raw payload. Swap in `errorDecoder` to map backend error contracts onto domain-specific error types.
-
----
-
-## Progress tracking
-
-Attach a `NetworkProgress` instance to any request to observe both uploads and downloads:
+#### Form URL Encoded
 
 ```swift
-let progress = NetworkProgress()
-
-struct UploadAvatar: NetworkRequest {
-    typealias Response = StatusCodeResponse
-    var path: String { "/profile/avatar" }
+struct LoginRequest: NetworkRequest {
+    struct Response: Decodable {
+        let token: String
+    }
+    
+    let username: String
+    let password: String
+    
+    var path: String { "/login" }
     var method: HTTPMethod { .post }
-    var progress: NetworkProgress? { progress }
-    var multipartData: MultipartFormData? { /* ... */ }
+    
+    var body: RequestBody? {
+        RequestBody(formURLEncoded: [
+            "username": username,
+            "password": password
+        ])
+    }
 }
 ```
 
-The `fractionCompleted` property stays on the main actor, ready for SwiftUI bindings or UIKit updates.
-
----
-
-## Dynamic base URL management
+#### Raw Data Body
 
 ```swift
-manager.updateBaseURL(URL(string: "https://api-v2.example.com")!)
-print(manager.baseURL) // updated instantly
+struct BinaryUploadRequest: NetworkRequest {
+    typealias Response = UploadResponse
+    
+    let binaryData: Data
+    
+    var path: String { "/api/upload/binary" }
+    var method: HTTPMethod { .post }
+    
+    var body: RequestBody? {
+        RequestBody(data: binaryData, contentType: "application/octet-stream")
+    }
+}
 ```
 
-Switch between staging, production, or feature environments without rebuilding the manager.
+#### Dynamic Base URL Changes
+
+```swift
+let manager = NetworkManager(
+    baseURL: URL(string: "https://api.staging.example.com")!
+)
+
+// Switch to production without recreating manager
+manager.updateBaseURL(URL(string: "https://api.example.com")!)
+
+// All subsequent requests will use the new URL
+```
+
+#### User-Agent Configuration
+
+```swift
+let userAgentConfig = UserAgentConfiguration(
+    appName: "MyApp",
+    appVersion: "2.0.0",
+    bundleIdentifier: "com.example.myapp",
+    buildNumber: "123",
+    osVersion: UIDevice.current.systemVersion
+)
+
+let manager = NetworkManager(
+    baseURL: baseURL,
+    userAgentConfiguration: userAgentConfig
+)
+// User-Agent will be automatically added to all requests
+```
 
 ---
 
-## Testing support
+## 🎓 Best Practices
 
-- `NetworkManaging` and `URLSessionProtocol` abstractions enable lightweight mocking.
-- The included test suite demonstrates request interception via `URLProtocol`, header verification, and status-only workflows—use it as a template for your own tests.
+### 1. Organizing Requests
+
+Group requests by functionality for better code organization:
+
+```swift
+enum AuthRequests {
+    struct SignIn: NetworkRequest {
+        struct Response: Decodable { let token: String }
+        let email: String
+        let password: String
+        var path: String { "/auth/sign-in" }
+        var method: HTTPMethod { .post }
+        // ...
+    }
+    
+    struct SignOut: NetworkRequest {
+        typealias Response = EmptyResponse
+        var path: String { "/auth/sign-out" }
+        var method: HTTPMethod { .post }
+    }
+    
+    struct RefreshToken: NetworkRequest {
+        struct Response: Decodable { let accessToken: String }
+        let refreshToken: String
+        var path: String { "/auth/refresh" }
+        var method: HTTPMethod { .post }
+        // ...
+    }
+}
+
+enum UserRequests {
+    struct GetProfile: NetworkRequest {
+        typealias Response = UserProfile
+        var path: String { "/user/profile" }
+        var method: HTTPMethod { .get }
+    }
+    
+    struct UpdateProfile: NetworkRequest {
+        typealias Response = UserProfile
+        let name: String
+        var path: String { "/user/profile" }
+        var method: HTTPMethod { .put }
+        // ...
+    }
+}
+```
+
+### 2. Centralized NetworkManager
+
+Create a single API access point:
+
+```swift
+class APIClient {
+    static let shared = APIClient()
+    
+    private let manager: NetworkManager
+    
+    private init() {
+        let baseURL = URL(string: "https://api.example.com")!
+        manager = NetworkManager(
+            baseURL: baseURL,
+            userAgentConfiguration: UserAgentConfiguration(
+                appName: Bundle.main.appName,
+                appVersion: Bundle.main.appVersion,
+                bundleIdentifier: Bundle.main.bundleIdentifier ?? "",
+                buildNumber: Bundle.main.buildNumber,
+                osVersion: UIDevice.current.systemVersion
+            )
+        )
+        manager.tokenRefresher = TokenManager()
+    }
+    
+    func send<T: NetworkRequest>(_ request: T) async throws -> T.Response {
+        try await manager.send(request, accessToken: {
+            TokenStore.shared.accessToken
+        })
+    }
+}
+
+// Usage
+let profile = try await APIClient.shared.send(UserRequests.GetProfile())
+```
+
+### 3. Error Handling
+
+Use error hierarchy for proper handling:
+
+```swift
+func handleRequest<T: NetworkRequest>(_ request: T) async {
+    do {
+        let response = try await manager.send(request, accessToken: tokenProvider)
+        // Handle successful response
+        await handleSuccess(response)
+    } catch let error as HTTPError {
+        switch error.statusCode {
+        case 400:
+            await handleBadRequest(error)
+        case 401:
+            await handleUnauthorized()
+        case 404:
+            await handleNotFound()
+        case 500...599:
+            await handleServerError(error)
+        default:
+            await handleUnknownError(error)
+        }
+    } catch NetworkError.unauthorized {
+        await handleUnauthorized()
+    } catch NetworkError.invalidURL {
+        await handleInvalidURL()
+    } catch {
+        await handleUnknownError(error)
+    }
+}
+```
+
+### 4. Testing
+
+Use protocols for mocking:
+
+```swift
+// Mock URLSession
+class MockURLSession: URLSessionProtocol {
+    var responseData: Data?
+    var response: URLResponse?
+    var error: Error?
+    
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        if let error = error {
+            throw error
+        }
+        return (
+            responseData ?? Data(),
+            response ?? HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+        )
+    }
+}
+
+// In tests
+func testSignIn() async throws {
+    let mockSession = MockURLSession()
+    mockSession.responseData = try JSONEncoder().encode(
+        SignInRequest.Response(token: "test-token", user: testUser)
+    )
+    
+    let manager = NetworkManager(
+        baseURL: URL(string: "https://test.com")!,
+        session: mockSession
+    )
+    
+    let response = try await manager.send(
+        SignInRequest(email: "test@test.com", password: "password"),
+        accessToken: nil
+    )
+    
+    XCTAssertEqual(response.token, "test-token")
+}
+```
 
 ---
 
-EKNetwork keeps the networking surface small, predictable, and testable while letting you opt into richer behaviours only when needed. Plug it into your modules, shape each request through Swift types, and let the framework take care of the repetitive plumbing. HAPPY networking! 
+## 🧪 Testing
+
+EKNetwork has comprehensive test coverage (21 tests) and provides protocols for easy testing:
+
+- ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- ✅ Query parameters
+- ✅ Various body types (JSON, Form URL Encoded, Multipart, Raw Data)
+- ✅ Retry policy
+- ✅ Token refresh
+- ✅ Error handling
+- ✅ Progress tracking
+- ✅ User-Agent configuration
+- ✅ Content-Length headers
+
+Run tests:
+
+```bash
+swift test
+```
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+
+### How to Help
+
+- ⭐ **Star the repository** on GitHub — helps the project be more visible
+- 🐛 **Report bugs** — create issues with detailed problem descriptions
+- 💡 **Suggest features** — share ideas for improving the library
+- 📝 **Improve documentation** — help make documentation better
+- 🔧 **Submit Pull Requests** — fixes and new features are always welcome
+- 💬 **Spread the word** — share with friends and colleagues
+- 🐦 **Watch for updates** — watch the repository to stay informed
+
+### Contribution Process
+
+1. Fork the repository
+2. Create a branch for your changes (`git checkout -b feature/amazing-feature`)
+3. Make changes and add tests
+4. Ensure all tests pass (`swift test`)
+5. Create a Pull Request with a detailed description of changes
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for more details.
+
+---
+
+## 💚 Support Project
+
+EKNetwork is an open source project created with love for the Swift community. If the project is useful to you, consider supporting it:
+
+### Ways to Support
+
+- ⭐ **Star on GitHub** — it's free and helps the project
+- 🐛 **Report bugs** — help improve quality
+- 💡 **Suggest ideas** — share your thoughts on development
+- 🔧 **Contribute code** — Pull Requests are always welcome
+- 📢 **Spread the word** — share on social media, blogs, conferences
+- 💰 **Financial support** — if you want to support development financially, contact the author
+
+### Why Support Matters
+
+- 🚀 Helps the project develop faster
+- 🐛 Improves quality and stability
+- 📚 Expands documentation and examples
+- 🌟 Makes the project more visible in the community
+- 💡 Inspires new features and improvements
+
+**Thank you to everyone who supports the project!** 🙏
+
+---
+
+## 📄 License
+
+EKNetwork is available under the MIT license. See [LICENSE](LICENSE) for more information.
+
+---
+
+## 🙏 Acknowledgments
+
+Thank you to all contributors who help improve EKNetwork!
+
+Special thanks to:
+- The Swift community for inspiration and feedback
+- Everyone who tests the library and reports bugs
+- Contributors who improve code and documentation
+
+---
+
+## 📞 Support & Contact
+
+- 💬 **Issues**: [GitHub Issues](https://github.com/emvakar/EKNetwork/issues)
+- 📖 **API Reference**: [API.md](API.md) - Complete API documentation
+- 📚 **Documentation**: [Full Documentation](https://github.com/emvakar/EKNetwork/wiki)
+- 🔒 **Security**: [SECURITY.md](SECURITY.md) for vulnerability reports
+
+---
+
+## 📊 Project Status
+
+- ✅ **Stable**: Ready for production use
+- ✅ **Tested**: 21 tests cover major scenarios
+- ✅ **Documented**: Complete documentation with examples
+- ✅ **Maintained**: Active support and development
+
+## 📁 Project Structure
+
+For developers wishing to contribute, see [PROJECT_STRUCTURE.md](PROJECT_STRUCTURE.md) for project structure understanding.
+
+## 🗺️ Roadmap
+
+For planned improvements and known issues, see [ROADMAP.md](ROADMAP.md).
+
+---
+
+<div align="center">
+
+**Made with ❤️ for the Swift community**
+
+[⬆ Back to top](#-eknetwork)
+
+[⭐ Star the project if it's useful to you!](#)
+
+</div>
+
+---
+
+## 🇷🇺 Русская документация
+
+Полная русскоязычная документация доступна в отдельных файлах:
+
+- 📖 **[README_RU.md](README_RU.md)** - Полная документация на русском языке
+- 📚 **[API_RU.md](API_RU.md)** - Справочник API на русском языке
+
+---
