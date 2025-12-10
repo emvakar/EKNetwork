@@ -1,0 +1,857 @@
+    1|       |//
+    2|       |//  NetworkManager.swift
+    3|       |//  EKNetwork
+    4|       |//
+    5|       |//  Created by Emil Karimov on 10.06.2025.
+    6|       |//  Copyright © 2025 Emil Karimov. All rights reserved.
+    7|       |//
+    8|       |
+    9|       |import os
+   10|       |import Foundation
+   11|       |#if canImport(UIKit)
+   12|       |import UIKit
+   13|       |#endif
+   14|       |#if canImport(AppKit)
+   15|       |import AppKit
+   16|       |#endif
+   17|       |
+   18|       |/// Helper to get EKNetwork version from embedded version file, Bundle, git tag, or fallback
+   19|       |/// When used as SPM dependency, version matches the package version that was connected
+   20|       |private enum EKNetworkVersion {
+   21|      1|    private static let cachedVersion: String = {
+   22|      1|        // Priority 1: Embedded version file (built into the package, most reliable for SPM)
+   23|      1|        // This version is set during build from git tag and always matches the connected package version
+   24|      1|        // The Version.swift file is updated automatically from git tag before each release
+   25|      1|        let embeddedVersion = EKNetworkVersionString
+   26|      1|        if !embeddedVersion.isEmpty {
+   27|      1|            return embeddedVersion
+   28|      1|        }
+   29|      0|        
+   30|      0|        // Priority 2: Environment variable (set during build, works for SPM)
+   31|      0|        if let envVersion = ProcessInfo.processInfo.environment["EKNETWORK_VERSION"], !envVersion.isEmpty {
+   32|      0|            return envVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+   33|      0|        }
+   34|      0|        
+   35|      0|        // Priority 3: Bundle of the framework itself (works for SPM when package has Info.plist)
+   36|      0|        let networkBundle = Bundle(for: NetworkManager.self)
+   37|      0|        
+   38|      0|        // Try CFBundleShortVersionString first
+   39|      0|        if let bundleVersion = networkBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+   40|      0|           !bundleVersion.isEmpty {
+   41|      0|            return bundleVersion
+   42|      0|        }
+   43|      0|        
+   44|      0|        // Try CFBundleVersion
+   45|      0|        if let bundleVersion = networkBundle.object(forInfoDictionaryKey: kCFBundleVersionKey as String) as? String,
+   46|      0|           !bundleVersion.isEmpty {
+   47|      0|            return bundleVersion
+   48|      0|        }
+   49|      0|        
+   50|      0|        // Priority 4: Try to get version from git tag in the framework's directory
+   51|      0|        // This works when framework is used directly (not as SPM dependency)
+   52|      0|        if let frameworkPath = networkBundle.bundlePath as String?,
+   53|      0|           let gitVersion = getGitVersion(from: frameworkPath) {
+   54|      0|            return gitVersion
+   55|      0|        }
+   56|      0|        
+   57|      0|        // Priority 5: Try to get git version from current working directory
+   58|      0|        // (only if framework is in source form, not as SPM dependency)
+   59|      0|        if let gitVersion = getGitVersion(from: nil) {
+   60|      0|            return gitVersion
+   61|      0|        }
+   62|      0|        
+   63|      0|        // Fallback: use embedded version (should always be set)
+   64|      0|        return embeddedVersion
+   65|      1|    }()
+   66|       |    
+   67|      2|    static var current: String {
+   68|      2|        return cachedVersion
+   69|      2|    }
+   70|       |    
+   71|       |    /// Tries to get git version from the framework's directory or current directory
+   72|       |    /// Note: Only works on macOS and Linux, not available on iOS/watchOS/tvOS
+   73|      0|    private static func getGitVersion(from frameworkPath: String?) -> String? {
+   74|       |        #if os(macOS) || os(Linux)
+   75|      0|        let process = Process()
+   76|      0|        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+   77|      0|        process.arguments = ["describe", "--tags", "--abbrev=0"]
+   78|      0|        
+   79|      0|        // If framework path is provided, try to find git repo relative to it
+   80|      0|        if let frameworkPath = frameworkPath {
+   81|      0|            // Navigate to framework's directory and try to find git repo
+   82|      0|            let url = URL(fileURLWithPath: frameworkPath)
+   83|      0|            var currentURL = url
+   84|      0|            
+   85|      0|            // Walk up the directory tree to find .git folder
+   86|      0|            for _ in 0..<10 { // Limit search to 10 levels up
+   87|      0|                let gitPath = currentURL.appendingPathComponent(".git")
+   88|      0|                if FileManager.default.fileExists(atPath: gitPath.path) {
+   89|      0|                    process.currentDirectoryURL = currentURL
+   90|      0|                    break
+   91|      0|                }
+   92|      0|                guard currentURL.pathComponents.count > 1 else { break }
+   93|      0|                currentURL = currentURL.deletingLastPathComponent()
+   94|      0|            }
+   95|      0|        }
+   96|      0|        
+   97|      0|        let pipe = Pipe()
+   98|      0|        process.standardOutput = pipe
+   99|      0|        process.standardError = Pipe() // Suppress errors
+  100|      0|        
+  101|      0|        do {
+  102|      0|            try process.run()
+  103|      0|            process.waitUntilExit()
+  104|      0|            
+  105|      0|            if process.terminationStatus == 0 {
+  106|      0|                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+  107|      0|                if let version = String(data: data, encoding: .utf8) {
+  108|      0|                    let trimmed = version.trimmingCharacters(in: .whitespacesAndNewlines)
+  109|      0|                    // Remove 'v' prefix if present (e.g., "v1.0.0" -> "1.0.0")
+  110|      0|                    return trimmed.hasPrefix("v") ? String(trimmed.dropFirst()) : trimmed
+  111|      0|                }
+  112|      0|            }
+  113|      0|        } catch {
+  114|      0|            // Silent fail - will use fallback
+  115|      0|        }
+  116|       |        #endif // os(macOS) || os(Linux)
+  117|      0|        
+  118|      0|        return nil
+  119|      0|    }
+  120|       |}
+  121|       |
+  122|       |/// Configuration for User-Agent header generation.
+  123|       |/// Formats the User-Agent string as: `AppName/Version (BundleID; build:BuildNumber; iOS Version) EKNetwork/Version`
+  124|       |public struct UserAgentConfiguration {
+  125|       |    /// Application name (e.g., "Cashdesk").
+  126|       |    public let appName: String
+  127|       |    /// Application version (e.g., "2.2.0").
+  128|       |    public let appVersion: String
+  129|       |    /// Bundle identifier (e.g., "com.taxcom.cashdesk").
+  130|       |    public let bundleIdentifier: String
+  131|       |    /// Build number (e.g., "116").
+  132|       |    public let buildNumber: String
+  133|       |    /// iOS/OS version (e.g., "17.3.1").
+  134|       |    public let osVersion: String
+  135|       |    /// EKNetwork framework version (defaults to embedded version file, which matches the connected SPM package version).
+  136|       |    public let networkVersion: String
+  137|       |    
+  138|       |    /// Initializes a User-Agent configuration.
+  139|       |    /// - Parameters:
+  140|       |    ///   - appName: Application name. Defaults to CFBundleName from Bundle.main.
+  141|       |    ///   - appVersion: Application version. Defaults to CFBundleShortVersionString from Bundle.main.
+  142|       |    ///   - bundleIdentifier: Bundle identifier. Defaults to CFBundleIdentifier from Bundle.main.
+  143|       |    ///   - buildNumber: Build number. Defaults to CFBundleVersion from Bundle.main.
+  144|       |    ///   - osVersion: OS version. Defaults to current system version.
+  145|       |    ///   - networkVersion: EKNetwork version. Defaults to embedded version file (Version.swift), which always matches the connected SPM package version.
+  146|       |    public init(
+  147|       |        appName: String? = nil,
+  148|       |        appVersion: String? = nil,
+  149|       |        bundleIdentifier: String? = nil,
+  150|       |        buildNumber: String? = nil,
+  151|       |        osVersion: String? = nil,
+  152|       |        networkVersion: String? = nil
+  153|      4|    ) {
+  154|      4|        let mainBundle = Bundle.main
+  155|      4|        
+  156|      4|        self.appName = appName ?? mainBundle.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "App"
+  157|      4|        self.appVersion = appVersion ?? mainBundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+  158|      4|        self.bundleIdentifier = bundleIdentifier ?? mainBundle.bundleIdentifier ?? "com.unknown.app"
+  159|      4|        self.buildNumber = buildNumber ?? mainBundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+  160|      4|        
+  161|      4|        // Get OS version
+  162|      4|        let defaultOSVersion: String
+  163|       |        #if canImport(UIKit)
+  164|       |        // UIDevice.current.systemVersion is safe to use synchronously in initialization
+  165|       |        defaultOSVersion = UIDevice.current.systemVersion
+  166|       |        #elseif canImport(AppKit)
+  167|      4|        let systemOSVersion = ProcessInfo.processInfo.operatingSystemVersion
+  168|      4|        defaultOSVersion = "\(systemOSVersion.majorVersion).\(systemOSVersion.minorVersion).\(systemOSVersion.patchVersion)"
+  169|       |        #else
+  170|       |        defaultOSVersion = ProcessInfo.processInfo.operatingSystemVersionString
+  171|       |        #endif
+  172|      4|        
+  173|      4|        self.osVersion = osVersion ?? defaultOSVersion
+  174|      4|        
+  175|      4|        // Get EKNetwork version from git tag (with fallback to Bundle)
+  176|      4|        // Priority: 1) provided networkVersion, 2) environment variable EKNETWORK_VERSION, 3) git tag, 4) Bundle
+  177|      4|        self.networkVersion = networkVersion ?? EKNetworkVersion.current
+  178|      4|    }
+  179|       |    
+  180|       |    /// Generates the User-Agent string in the format:
+  181|       |    /// `AppName/Version (BundleID; build:BuildNumber; iOS/iOSVersion) EKNetwork/Version`
+  182|      4|    public func generateUserAgentString() -> String {
+  183|      4|        let platform: String
+  184|       |        #if canImport(UIKit)
+  185|       |        platform = "iOS"
+  186|       |        #elseif canImport(AppKit)
+  187|      4|        platform = "macOS"
+  188|       |        #else
+  189|       |        platform = "Unknown"
+  190|       |        #endif
+  191|      4|        
+  192|      4|        return "\(appName)/\(appVersion) (\(bundleIdentifier); build:\(buildNumber); \(platform) \(osVersion)) EKNetwork/\(networkVersion)"
+  193|      4|    }
+  194|       |}
+  195|       |
+  196|      5|private func normalizeHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
+  197|      5|    headers.reduce(into: [String: String]()) { result, element in
+  198|      5|        guard let key = element.key as? String else { return }
+  199|      5|        if let value = element.value as? String {
+  200|      5|            result[key] = value
+  201|      5|        } else {
+  202|      0|            result[key] = String(describing: element.value)
+  203|      0|        }
+  204|      5|    }
+  205|      5|}
+  206|       |
+  207|       |/// HTTP methods supported by the network layer.
+  208|       |public enum HTTPMethod: String {
+  209|       |
+  210|       |    case get = "GET"
+  211|       |    case post = "POST"
+  212|       |    case put = "PUT"
+  213|       |    case delete = "DELETE"
+  214|       |    case patch = "PATCH"
+  215|       |
+  216|       |}
+  217|       |
+  218|       |/// Represents multipart form data for file uploads.
+  219|       |public struct MultipartFormData {
+  220|       |
+  221|       |    /// Represents a single part in the multipart form data.
+  222|       |    public struct Part {
+  223|       |        /// Name of the form field.
+  224|       |        public let name: String
+  225|       |        /// Optional filename for the part.
+  226|       |        public let filename: String?
+  227|       |        /// Data content of the part.
+  228|       |        public let data: Data
+  229|       |        /// MIME type of the data.
+  230|       |        public let mimeType: String
+  231|       |        
+  232|       |        /// Initializes a new multipart form data part.
+  233|       |        /// - Parameters:
+  234|       |        ///   - name: Form field name.
+  235|       |        ///   - filename: Optional filename.
+  236|       |        ///   - data: Data content.
+  237|       |        ///   - mimeType: MIME type string.
+  238|      7|        public init(name: String, filename: String? = nil, data: Data, mimeType: String) {
+  239|      7|            self.name = name
+  240|      7|            self.filename = filename
+  241|      7|            self.data = data
+  242|      7|            self.mimeType = mimeType
+  243|      7|        }
+  244|       |    }
+  245|       |
+  246|       |    /// Unique boundary string used to separate parts.
+  247|      4|    public let boundary: String = UUID().uuidString
+  248|       |    /// Array of parts included in the multipart form.
+  249|      4|    public var parts: [Part] = []
+  250|       |
+  251|       |    /// Initializes an empty multipart form data object.
+  252|      4|    public init() {}
+  253|       |
+  254|       |    /// Adds a new part to the multipart form data.
+  255|       |    /// - Parameters:
+  256|       |    ///   - name: Form field name.
+  257|       |    ///   - data: Data content.
+  258|       |    ///   - mimeType: MIME type string.
+  259|       |    ///   - filename: Optional filename.
+  260|      6|    public mutating func addPart(name: String, data: Data, mimeType: String, filename: String? = nil) {
+  261|      6|        parts.append(Part(name: name, filename: filename, data: data, mimeType: mimeType))
+  262|      6|    }
+  263|       |
+  264|       |    /// Encodes the multipart form data into a Data object suitable for HTTP body.
+  265|       |    /// - Returns: Encoded Data representing the multipart form.
+  266|      3|    public func encodedData() -> Data {
+  267|      3|        var result = Data()
+  268|      3|        let boundaryPrefix = "--\(boundary)\r\n"
+  269|      3|        
+  270|      5|        for part in parts {
+  271|      5|            result.append(Data(boundaryPrefix.utf8))
+  272|      5|            if let filename = part.filename {
+  273|      2|                result.append("Content-Disposition: form-data; name=\"\(part.name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+  274|      3|            } else {
+  275|      3|                result.append("Content-Disposition: form-data; name=\"\(part.name)\"\r\n".data(using: .utf8)!)
+  276|      3|            }
+  277|      5|            result.append("Content-Type: \(part.mimeType)\r\n\r\n".data(using: .utf8)!)
+  278|      5|            result.append(part.data)
+  279|      5|            result.append("\r\n".data(using: .utf8)!)
+  280|      5|        }
+  281|      3|        
+  282|      3|        result.append("--\(boundary)--\r\n".data(using: .utf8)!)
+  283|      3|        return result
+  284|      3|    }
+  285|       |}
+  286|       |
+  287|       |/// Errors that can occur during network operations.
+  288|       |public enum NetworkError: Error {
+  289|       |    /// URL could not be constructed.
+  290|       |    case invalidURL
+  291|       |    /// Response data was empty.
+  292|       |    case emptyResponse
+  293|       |    /// Unauthorized access, typically HTTP 401.
+  294|       |    case unauthorized
+  295|       |    /// Response was missing or of an unexpected type.
+  296|       |    case invalidResponse
+  297|       |    /// Both body and multipartData are set, which is not allowed.
+  298|       |    case conflictingBodyTypes
+  299|       |}
+  300|       |
+  301|       |/// Generic HTTP error carrying status code and payload for diagnostics.
+  302|       |public struct HTTPError: LocalizedError {
+  303|       |    public let statusCode: Int
+  304|       |    public let data: Data
+  305|       |    public let headers: [String: String]
+  306|       |
+  307|      3|    public init(statusCode: Int, data: Data, headers: [AnyHashable: Any]) {
+  308|      3|        self.statusCode = statusCode
+  309|      3|        self.data = data
+  310|      3|        self.headers = normalizeHeaders(headers)
+  311|      3|    }
+  312|       |
+  313|      1|    public var errorDescription: String? {
+  314|      1|        "Request failed with status code \(statusCode)"
+  315|      1|    }
+  316|       |}
+  317|       |
+  318|       |/// Convenience response that only exposes the HTTP status code and headers.
+  319|       |public struct StatusCodeResponse: Decodable, Equatable {
+  320|       |    public let statusCode: Int
+  321|       |    public let headers: [String: String]
+  322|       |
+  323|      2|    public init(statusCode: Int, headers: [AnyHashable: Any]) {
+  324|      2|        self.statusCode = statusCode
+  325|      2|        self.headers = normalizeHeaders(headers)
+  326|      2|    }
+  327|       |
+  328|      2|    public init(from decoder: Decoder) throws {
+  329|      2|        let container = try decoder.container(keyedBy: CodingKeys.self)
+  330|      2|        statusCode = try container.decode(Int.self, forKey: .statusCode)
+  331|      2|        headers = try container.decodeIfPresent([String: String].self, forKey: .headers) ?? [:]
+  332|      2|    }
+  333|       |
+  334|       |    private enum CodingKeys: String, CodingKey {
+  335|       |        case statusCode
+  336|       |        case headers
+  337|       |    }
+  338|       |}
+  339|       |
+  340|       |/// Represents an empty payload. Useful for endpoints that only signal success via status code.
+  341|       |public struct EmptyResponse: Decodable, Equatable {
+  342|      4|    public init() {}
+  343|       |}
+  344|       |
+  345|       |/// Protocol representing a network request.
+  346|       |/// Conforming types define the request path, method, headers, parameters, and response type.
+  347|       |public protocol NetworkRequest {
+  348|       |
+  349|       |    /// The expected response type, must conform to Decodable.
+  350|       |    associatedtype Response: Decodable
+  351|       |
+  352|       |    /// The path component appended to the base URL.
+  353|       |    var path: String { get }
+  354|       |    /// HTTP method for the request.
+  355|       |    var method: HTTPMethod { get }
+  356|       |    /// Optional HTTP headers to include in the request.
+  357|       |    var headers: [String: String]? { get }
+  358|       |    /// Optional query parameters appended to the URL.
+  359|       |    var queryParameters: [String: String]? { get }
+  360|       |    /// Content-Type header for the request. Defaults to "application/json".
+  361|       |    var contentType: String { get }
+  362|       |    /// Optional body sent with the request, supporting multiple encodings.
+  363|       |    /// Use `RequestBody` to specify content and content type.
+  364|       |    var body: RequestBody? { get }
+  365|       |    /// Optional multipart form data for upload requests.
+  366|       |    var multipartData: MultipartFormData? { get }
+  367|       |    /// Optional progress observer for upload/download progress.
+  368|       |    var progress: NetworkProgress? { get }
+  369|       |    /// Retry policy to apply for this request.
+  370|       |    var retryPolicy: RetryPolicy { get }
+  371|       |    
+  372|       |    /// Optional custom error decoder to extract server-side error responses.
+  373|       |    var errorDecoder: ((Data) -> Error?)? { get }
+  374|       |    
+  375|       |    /// Should the request allow retries and token refresh on 401 Unauthorized?
+  376|       |    var allowsRetry: Bool { get }
+  377|       |
+  378|       |    /// Decodes the raw response into the associated response type.
+  379|       |    /// Default implementation handles JSON decoding and empty-response fallbacks.
+  380|       |    func decodeResponse(data: Data, response: URLResponse) throws -> Response
+  381|       |
+  382|       |    /// Optional handler used when the server returns an empty body.
+  383|       |    var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }
+  384|       |
+  385|       |    /// Provides a decoder instance for JSON responses.
+  386|       |    var jsonDecoder: JSONDecoder { get }
+  387|       |
+  388|       |    /// Provides an encoder instance for JSON request bodies.
+  389|       |    var jsonEncoder: JSONEncoder { get }
+  390|       |}
+  391|       |
+  392|       |/// Default implementation
+  393|       |public extension NetworkRequest {
+  394|     41|    var headers: [String: String]? { nil }
+  395|     42|    var queryParameters: [String: String]? { nil }
+  396|     45|    var contentType: String { "application/json" }
+  397|     72|    var body: RequestBody? { nil }
+  398|     47|    var multipartData: MultipartFormData? { nil }
+  399|     43|    var progress: NetworkProgress? { nil }
+  400|      7|    var retryPolicy: RetryPolicy { RetryPolicy() }
+  401|      2|    var errorDecoder: ((Data) -> Error?)? { nil }
+  402|       |    /// Default implementation for `allowsRetry` to maintain backward compatibility.
+  403|       |    /// Requests allow retries and token refresh on 401 by default.
+  404|      0|    var allowsRetry: Bool { true }
+  405|      1|    var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { nil }
+  406|     27|    var jsonDecoder: JSONDecoder { JSONDecoder() }
+  407|      2|    var jsonEncoder: JSONEncoder { JSONEncoder() }
+  408|       |
+  409|     31|    func decodeResponse(data: Data, response: URLResponse) throws -> Response {
+  410|     31|        if data.isEmpty {
+  411|      3|            guard let handler = emptyResponseHandler else {
+  412|      1|                throw NetworkError.emptyResponse
+  413|      2|            }
+  414|      2|            guard let httpResponse = response as? HTTPURLResponse else {
+  415|      1|                throw NetworkError.invalidResponse
+  416|      1|            }
+  417|      1|            return try handler(httpResponse)
+  418|     28|        }
+  419|     28|        return try jsonDecoder.decode(Response.self, from: data)
+  420|     31|    }
+  421|       |
+  422|       |}
+  423|       |
+  424|       |public extension NetworkRequest where Response == StatusCodeResponse {
+  425|      1|    var emptyResponseHandler: ((HTTPURLResponse) throws -> StatusCodeResponse)? {
+  426|      1|        { StatusCodeResponse(statusCode: $0.statusCode, headers: $0.allHeaderFields) }
+  427|      1|    }
+  428|       |}
+  429|       |
+  430|       |public extension NetworkRequest where Response == EmptyResponse {
+  431|      0|    var emptyResponseHandler: ((HTTPURLResponse) throws -> EmptyResponse)? { { _ in EmptyResponse() } }
+  432|       |
+  433|      1|    func decodeResponse(data: Data, response: URLResponse) throws -> EmptyResponse {
+  434|      1|        // Ignore server payload; success is considered sufficient.
+  435|      1|        return EmptyResponse()
+  436|      1|    }
+  437|       |}
+  438|       |
+  439|       |/// Represents a request body for a network request, supporting various types including:
+  440|       |/// - `Encodable` for JSON payloads
+  441|       |/// - Raw `Data` for binary or pre-encoded content
+  442|       |/// - `InputStream` for large streaming uploads
+  443|       |/// - Form URL encoded data (`application/x-www-form-urlencoded`)
+  444|       |public struct RequestBody {
+  445|       |    /// The underlying content of the request body.
+  446|       |    public enum Content {
+  447|       |        /// JSON-encodable object
+  448|       |        case encodable(Encodable)
+  449|       |        /// Raw binary or pre-encoded data
+  450|       |        case raw(Data)
+  451|       |        /// Stream for large data uploads
+  452|       |        case stream(InputStream)
+  453|       |        /// Key-value pairs for form URL encoded data
+  454|       |        case formURLEncoded([String: String])
+  455|       |    }
+  456|       |
+  457|       |    public let content: Content
+  458|       |    public let contentType: String
+  459|       |
+  460|      9|    public init(encodable: Encodable, contentType: String = "application/json") {
+  461|      9|        self.content = .encodable(encodable)
+  462|      9|        self.contentType = contentType
+  463|      9|    }
+  464|       |
+  465|      3|    public init(data: Data, contentType: String) {
+  466|      3|        self.content = .raw(data)
+  467|      3|        self.contentType = contentType
+  468|      3|    }
+  469|       |
+  470|      3|    public init(stream: InputStream, contentType: String) {
+  471|      3|        self.content = .stream(stream)
+  472|      3|        self.contentType = contentType
+  473|      3|    }
+  474|       |    
+  475|      5|    public init(formURLEncoded parameters: [String: String]) {
+  476|      5|        self.content = .formURLEncoded(parameters)
+  477|      5|        self.contentType = "application/x-www-form-urlencoded"
+  478|      5|    }
+  479|       |
+  480|       |}
+  481|       |
+  482|       |/// Defines the retry behavior for network requests, including maximum retry attempts,
+  483|       |/// delay between retries, and a closure to determine if a retry should occur based on the error.
+  484|       |public struct RetryPolicy {
+  485|       |
+  486|       |    /// Maximum number of retry attempts.
+  487|       |    public let maxRetryCount: Int
+  488|       |    /// Delay in seconds before retrying a request.
+  489|       |    public let delay: TimeInterval
+  490|       |    /// Closure to determine if a request should be retried based on the encountered error.
+  491|       |    public let shouldRetry: (Error) -> Bool
+  492|       |
+  493|       |    /// Initializes a new RetryPolicy.
+  494|       |    /// - Parameters:
+  495|       |    ///   - maxRetryCount: Maximum number of retries (default is 0).
+  496|       |    ///   - delay: Delay between retries in seconds (default is 1.0).
+  497|       |    ///   - shouldRetry: Closure to decide if retry should occur based on error.
+  498|      4|    public init(maxRetryCount: Int = 0, delay: TimeInterval = 1.0, shouldRetry: @escaping (Error) -> Bool = {
+  499|      4|        // Do not retry on known business logic errors or unauthorized access
+  500|      4|        if case NetworkError.unauthorized = $0 {
+  501|      1|        return false
+  502|      3|    }
+  503|      3|        if let urlError = $0 as? URLError {
+  504|      2|        return urlError.code != .userAuthenticationRequired
+  505|      2|    }
+  506|      1|        // Do not retry errors that are already user-presentable or business-level
+  507|      1|        let typeName = String(describing: type(of: $0))
+  508|      1|        if typeName.contains("APIError") || typeName.contains("ServerError") || typeName.contains("Business") {
+  509|      1|        return false
+  510|      1|    }
+  511|      0|        return true
+  512|     27|    }) {
+  513|     27|        self.maxRetryCount = maxRetryCount
+  514|     27|        self.delay = delay
+  515|     27|        self.shouldRetry = shouldRetry
+  516|     27|    }
+  517|       |
+  518|       |}
+  519|       |
+  520|       |/// Observable object to track progress of network uploads or downloads.
+  521|       |@MainActor
+  522|       |public final class NetworkProgress: ObservableObject {
+  523|       |    /// Fraction of task completed, ranging from 0.0 to 1.0.
+  524|      3|    @Published public var fractionCompleted: Double = 0.0
+  525|       |
+  526|       |    /// Initializes a new NetworkProgress instance.
+  527|      3|    public init() {}
+  528|       |}
+  529|       |
+  530|       |/// Protocol for providing token refresh functionality.
+  531|       |/// Implementers should handle refreshing authentication tokens as needed.
+  532|       |public protocol TokenRefreshProvider: AnyObject {
+  533|       |    /// Refreshes authentication token if needed.
+  534|       |    /// This method is called automatically when a 401 Unauthorized response is received.
+  535|       |    func refreshTokenIfNeeded() async throws
+  536|       |}
+  537|       |
+  538|       |/// Protocol abstraction for NetworkManager to allow mocking and dependency injection.
+  539|       |public protocol NetworkManaging {
+  540|       |
+  541|       |    var tokenRefresher: TokenRefreshProvider? { get set }
+  542|       |
+  543|       |    /// Sends a network request and returns the decoded response.
+  544|       |    /// - Parameter request: The network request to send.
+  545|       |    /// - Returns: A decoded response of type `T.Response`.
+  546|       |    func send<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?) async throws -> T.Response
+  547|       |}
+  548|       |
+  549|       |/// Protocol abstraction for URLSession to allow mocking and dependency injection.
+  550|       |public protocol URLSessionProtocol {
+  551|       |    func data(for request: URLRequest) async throws -> (Data, URLResponse)
+  552|       |}
+  553|       |
+  554|       |extension URLSession: URLSessionProtocol {}
+  555|       |
+  556|       |/// Manages network requests, including retries, token refresh, and progress reporting.
+  557|       |open class NetworkManager: NetworkManaging {
+  558|       |
+  559|       |    /// The base URL that all request paths will be appended to.
+  560|       |    /// Can be changed dynamically using `updateBaseURL(_:)` method.
+  561|       |    private(set) public var baseURL: URL
+  562|       |    private let session: URLSessionProtocol
+  563|       |    /// Optional token refresher to handle authentication token renewal.
+  564|       |    public var tokenRefresher: TokenRefreshProvider?
+  565|       |    /// User-Agent configuration. If set, automatically adds User-Agent header to all requests.
+  566|       |    public var userAgentConfiguration: UserAgentConfiguration?
+  567|       |    private let logger: Logger
+  568|       |
+  569|       |    /// Initializes a `NetworkManager` with the given configuration.
+  570|       |    /// - Parameters:
+  571|       |    ///   - baseURL: The base URL that all request paths will be appended to.
+  572|       |    ///   - tokenRefresher: Optional token refresher for handling automatic re-authentication (e.g. refresh token logic).
+  573|       |    ///   - session: The `URLSessionProtocol` to use for making requests. Defaults to `URLSession.shared`.
+  574|       |    ///   - loggerSubsystem: The subsystem identifier used for the `Logger` instance. Defaults to "com.yourapp.networking".
+  575|       |    ///   - userAgentConfiguration: Optional User-Agent configuration. If provided, User-Agent header will be automatically set for all requests. If nil, User-Agent is not set.
+  576|       |    public init(
+  577|       |        baseURL: URL,
+  578|       |        session: URLSessionProtocol = URLSession.shared,
+  579|       |        loggerSubsystem: String = "com.yourapp.networking",
+  580|       |        userAgentConfiguration: UserAgentConfiguration? = nil
+  581|     38|    ) {
+  582|     38|        self.baseURL = baseURL
+  583|     38|        self.session = session
+  584|     38|        self.userAgentConfiguration = userAgentConfiguration
+  585|     38|        self.logger = Logger(subsystem: loggerSubsystem, category: "network")
+  586|     38|    }
+  587|       |
+  588|       |    /// Updates the base URL for all subsequent network requests.
+  589|       |    /// - Parameter newBaseURL: The new base URL to use.
+  590|       |    /// - Note: This change takes effect immediately for all new requests.
+  591|       |    ///         Requests that are currently in progress will still use the old base URL.
+  592|      1|    public func updateBaseURL(_ newBaseURL: URL) {
+  593|      1|        logger.info("🔄 [NETWORK] Base URL updated from \(self.baseURL.absoluteString, privacy: .public) to \(newBaseURL.absoluteString, privacy: .public)")
+  594|      1|        self.baseURL = newBaseURL
+  595|      1|    }
+  596|       |
+  597|       |    /// Sends a network request and decodes the response.
+  598|       |    /// - Parameter request: The network request to send.
+  599|       |    /// - Returns: Decoded response of type `T.Response`.
+  600|       |    /// - Throws: Errors encountered during the request or decoding.
+  601|     38|    public func send<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?) async throws -> T.Response {
+  602|     38|        return try await performRequest(request, accessToken: accessToken, shouldRetry: true, attempt: 0)
+  603|     38|    }
+  604|       |    
+  605|       |
+  606|     34|    fileprivate func parseError(_ response: URLResponse, _ request: any NetworkRequest, _ data: Data) throws {
+  607|     34|        // Decode the response data into the expected Response type.
+  608|     34|        if let httpResponse = response as? HTTPURLResponse, !(200..<300).contains(httpResponse.statusCode) {
+  609|      2|            if let customError = request.errorDecoder?(data) {
+  610|      1|                throw customError
+  611|      1|            }
+  612|      1|            throw HTTPError(statusCode: httpResponse.statusCode, data: data, headers: httpResponse.allHeaderFields)
+  613|     32|        }
+  614|     32|    }
+  615|       |
+  616|       |    /// Internal method to perform the network request with retry logic.
+  617|       |    /// - Parameters:
+  618|       |    ///   - request: The network request.
+  619|       |    ///   - shouldRetry: Flag indicating if retry is allowed (used to prevent infinite retries on 401).
+  620|       |    ///   - attempt: Current retry attempt count.
+  621|       |    /// - Returns: Decoded response.
+  622|       |    /// - Throws: Errors if request fails or decoding fails.
+  623|     44|    private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
+  624|     44|        // Capture baseURL locally to prevent race conditions if it's updated during request execution
+  625|     44|        let currentBaseURL = baseURL
+  626|     44|        
+  627|     44|        // Construct URLComponents based on baseURL and request path.
+  628|     44|        guard var urlComponents = URLComponents(url: currentBaseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
+  629|      0|            throw NetworkError.invalidURL
+  630|     44|        }
+  631|     44|        // Append query parameters if provided.
+  632|     44|        if let query = request.queryParameters {
+  633|      6|            urlComponents.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+  634|      2|        }
+  635|     44|
+  636|     44|        guard let url = urlComponents.url else {
+  637|      0|            throw NetworkError.invalidURL
+  638|     44|        }
+  639|     44|        
+  640|     44|        logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public)")
+  641|     44|        
+  642|     44|        var urlRequest = URLRequest(url: url)
+  643|     44|        
+  644|     44|        urlRequest.httpMethod = request.method.rawValue.uppercased()
+  645|     44|
+  646|     44|        // Set headers if provided.
+  647|     44|        if let headers = request.headers {
+  648|      4|            for (key, value) in headers {
+  649|      4|                urlRequest.setValue(value, forHTTPHeaderField: key)
+  650|      4|            }
+  651|      3|        }
+  652|     44|
+  653|     44|        if let accessToken = accessToken?(),
+  654|     44|           urlRequest.value(forHTTPHeaderField: "Authorization") == nil {
+  655|      1|            urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+  656|      1|        }
+  657|     44|
+  658|     44|        // Set Accept header to application/json if Content-Type is application/json and Accept is not already set
+  659|     44|        if request.contentType.contains("application/json"),
+  660|     44|           urlRequest.value(forHTTPHeaderField: "Accept") == nil {
+  661|     42|            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+  662|     42|        }
+  663|     44|
+  664|     44|        // Set User-Agent header if configured and not already set
+  665|     44|        if let userAgentConfig = userAgentConfiguration,
+  666|     44|           urlRequest.value(forHTTPHeaderField: "User-Agent") == nil {
+  667|      1|            urlRequest.setValue(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
+  668|      1|        }
+  669|     44|
+  670|     44|        // Validate that body and multipartData are not both set
+  671|     44|        if request.body != nil && request.multipartData != nil {
+  672|      1|            throw NetworkError.conflictingBodyTypes
+  673|     43|        }
+  674|     43|        
+  675|     43|        // Set body if provided.
+  676|     43|        if let requestBody = request.body {
+  677|      7|            var bodyLength: Int?
+  678|      7|            switch requestBody.content {
+  679|      7|            case .encodable(let encodable):
+  680|      3|                let encoder = request.jsonEncoder
+  681|      3|                let encodedData = try encoder.encode(AnyEncodable(encodable))
+  682|      3|                urlRequest.httpBody = encodedData
+  683|      3|                bodyLength = encodedData.count
+  684|      3|                // Use request.contentType instead of requestBody.contentType for better control
+  685|      3|                urlRequest.setValue(request.contentType, forHTTPHeaderField: "Content-Type")
+  686|      7|            case .raw(let data):
+  687|      1|                urlRequest.httpBody = data
+  688|      1|                bodyLength = data.count
+  689|      1|                // For raw data, prefer requestBody.contentType if set, otherwise use request.contentType
+  690|      1|                urlRequest.setValue(requestBody.contentType, forHTTPHeaderField: "Content-Type")
+  691|      7|            case .stream(let stream):
+  692|      1|                urlRequest.httpBodyStream = stream
+  693|      1|                // For stream, prefer requestBody.contentType if set, otherwise use request.contentType
+  694|      1|                urlRequest.setValue(requestBody.contentType, forHTTPHeaderField: "Content-Type")
+  695|      7|                // do not set bodyLength, as it's unknown for streams
+  696|      7|            case .formURLEncoded(let parameters):
+  697|      2|                var components = URLComponents()
+  698|      5|                components.queryItems = parameters.map { URLQueryItem(name: $0.key, value: $0.value) }
+  699|      2|                guard let query = components.percentEncodedQuery,
+  700|      2|                      let data = query.data(using: .utf8) else { throw NetworkError.invalidURL }
+  701|      2|                urlRequest.httpBody = data
+  702|      2|                bodyLength = data.count
+  703|      2|                // Form URL encoded always uses application/x-www-form-urlencoded
+  704|      2|                urlRequest.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+  705|      7|            }
+  706|      7|            // Set Content-Length header when known (except for streams)
+  707|      7|            if let length = bodyLength {
+  708|      6|                urlRequest.setValue("\(length)", forHTTPHeaderField: "Content-Length")
+  709|      6|            }
+  710|     43|        }
+  711|     43|
+  712|     43|        // Set multipart form data if provided.
+  713|     43|        if let multipart = request.multipartData {
+  714|      1|            let multipartData = multipart.encodedData()
+  715|      1|            urlRequest.httpBody = multipartData
+  716|      1|            urlRequest.setValue("multipart/form-data; boundary=\(multipart.boundary)", forHTTPHeaderField: "Content-Type")
+  717|      1|            urlRequest.setValue("\(multipartData.count)", forHTTPHeaderField: "Content-Length")
+  718|      1|        }
+  719|     43|
+  720|     43|        // Use a URLSession with delegate for progress if needed.
+  721|     43|        // We use a shared progressSession with a delegate manager to avoid creating new sessions
+  722|     43|        // for each request, which prevents memory leaks.
+  723|     43|        let sessionToUse: URLSessionProtocol
+  724|     43|        if let progress = request.progress {
+  725|      0|            // For progress tracking, we need to use URLSession with delegate.
+  726|      0|            // Since URLSessionProtocol doesn't support delegates, we create a temporary session.
+  727|      0|            // Note: This is a limitation of the protocol abstraction. In production, consider
+  728|      0|            // using a shared progress session with a delegate manager for better memory management.
+  729|      0|            let delegate = ProgressDelegate(progress: progress)
+  730|      0|            let progressSession = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
+  731|      0|            sessionToUse = progressSession
+  732|     43|        } else {
+  733|     43|            sessionToUse = session
+  734|     43|        }
+  735|     43|
+  736|     43|        do {
+  737|     43|            // Perform network data task.
+  738|     43|            let (data, response) = try await sessionToUse.data(for: urlRequest)
+  739|     37|
+  740|     37|            // Handle HTTP 401 Unauthorized response.
+  741|     37|            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
+  742|      3|                // Check if the request allows retry and if retries are allowed for this attempt.
+  743|      3|                if request.allowsRetry, shouldRetry {
+  744|      2|                    // Attempt to refresh the token. If successful, retry the request once.
+  745|      2|                    // Note: shouldRetry is set to false to prevent infinite retry loops.
+  746|      2|                    // The attempt count is not incremented here as this is a token refresh retry,
+  747|      2|                    // not a regular retry policy retry. If the token refresh fails or the request
+  748|      2|                    // still returns 401, we will throw NetworkError.unauthorized.
+  749|      2|                    try await refreshTokenIfNeeded()
+  750|      1|                    return try await performRequest(request, accessToken: accessToken, shouldRetry: false, attempt: attempt)
+  751|      2|                }
+  752|      1|                
+  753|      1|                // Try to decode custom error after token refresh fails or is disabled
+  754|      1|                if let customError = request.errorDecoder?(data) {
+  755|      0|                    throw customError
+  756|      1|                }
+  757|      1|                // If retries are disallowed, throw unauthorized error immediately without retry or token refresh.
+  758|      1|                throw NetworkError.unauthorized
+  759|     34|            }
+  760|     34|            try parseError(response, request, data)
+  761|     32|            let decoded = try request.decodeResponse(data: data, response: response)
+  762|     30|            logger.info("✅ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public) SUCCESS")
+  763|     30|            return decoded
+  764|     43|
+  765|     43|        } catch {
+  766|     12|            logger.debug("Evaluating retry policy: attempt \(attempt), max \(request.retryPolicy.maxRetryCount)")
+  767|     12|            if attempt < request.retryPolicy.maxRetryCount, request.retryPolicy.shouldRetry(error) {
+  768|      5|                logger.debug("Retry policy decided to retry for error: \(String(describing: error), privacy: .public)")
+  769|      5|                logger.warning("Request failed: \(request.path, privacy: .public), attempt: \(attempt), error: \(String(describing: error), privacy: .public)")
+  770|      5|                logger.debug("Retrying request: \(request.path, privacy: .public), next attempt: \(attempt + 1)")
+  771|      5|                // Wait for the specified delay before retrying.
+  772|      5|                try await Task.sleep(nanoseconds: UInt64(request.retryPolicy.delay * 1_000_000_000))
+  773|      5|                // Retry the request with incremented attempt count.
+  774|      5|                return try await performRequest(request, accessToken: accessToken, shouldRetry: shouldRetry, attempt: attempt + 1)
+  775|      7|            }
+  776|      7|            // Log permanent failure and rethrow the error.
+  777|      7|            logger.error("Request failed permanently: \(request.path, privacy: .public), error: \(String(describing: error), privacy: .public)")
+  778|      7|            throw error
+  779|     12|        }
+  780|     43|    }
+  781|       |
+  782|       |    /// Calls the token refresher to refresh authentication tokens if needed.
+  783|       |    /// This is triggered when a 401 Unauthorized response is received.
+  784|      2|    private func refreshTokenIfNeeded() async throws {
+  785|      2|        try await tokenRefresher?.refreshTokenIfNeeded()
+  786|      1|    }
+  787|       |    
+  788|       |
+  789|       |}
+  790|       |
+  791|       |/// URLSession delegate implementation to report upload and download progress.
+  792|       |final class ProgressDelegate: NSObject, URLSessionTaskDelegate, URLSessionDataDelegate {
+  793|       |    
+  794|       |    private let progress: NetworkProgress
+  795|       |
+  796|       |    /// Initializes the delegate with a NetworkProgress instance.
+  797|       |    /// - Parameter progress: The progress object to update.
+  798|      0|    init(progress: NetworkProgress) {
+  799|      0|        self.progress = progress
+  800|      0|    }
+  801|       |
+  802|       |    /// Delegate method called periodically to report upload progress.
+  803|      0|    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+  804|      0|        guard totalBytesExpectedToSend > 0 else { return }
+  805|      0|        // NetworkProgress is @MainActor, so we need to update on the main actor
+  806|      0|        // Note: delegateQueue is set to nil (main queue), but we use Task for safety
+  807|      0|        Task { @MainActor in
+  808|      0|            self.progress.fractionCompleted = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
+  809|      0|        }
+  810|      0|    }
+  811|       |
+  812|      0|    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+  813|      0|        completionHandler(.allow)
+  814|      0|    }
+  815|       |
+  816|      0|    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+  817|      0|        let expected = dataTask.countOfBytesExpectedToReceive
+  818|      0|        guard expected > 0 else { return }
+  819|      0|        let received = dataTask.countOfBytesReceived
+  820|      0|        let fraction = min(Double(received) / Double(expected), 1.0)
+  821|      0|        // NetworkProgress is @MainActor, so we need to update on the main actor
+  822|      0|        Task { @MainActor in
+  823|      0|            self.progress.fractionCompleted = fraction
+  824|      0|        }
+  825|      0|    }
+  826|       |
+  827|      0|    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+  828|      0|        guard error == nil else { return }
+  829|      0|        // NetworkProgress is @MainActor, so we need to update on the main actor
+  830|      0|        Task { @MainActor in
+  831|      0|            self.progress.fractionCompleted = 1.0
+  832|      0|        }
+  833|      0|    }
+  834|       |
+  835|       |}
+  836|       |
+  837|       |struct AnyEncodable: Encodable {
+  838|       |    
+  839|       |    private let encodeClosure: (Encoder) throws -> Void
+  840|       |
+  841|      3|    init(_ wrapped: Encodable) {
+  842|      6|        self.encodeClosure = wrapped.encode(to:)
+  ------------------
+  | $s9EKNetwork12AnyEncodableVyACSE_pcfcys7Encoder_pKcSE_pYbcfu_:
+  |  842|      3|        self.encodeClosure = wrapped.encode(to:)
+  ------------------
+  | $s9EKNetwork12AnyEncodableVyACSE_pcfcys7Encoder_pKcSE_pYbcfu_ysAD_pKcfu0_:
+  |  842|      3|        self.encodeClosure = wrapped.encode(to:)
+  ------------------
+  843|      3|    }
+  844|       |
+  845|      3|    func encode(to encoder: Encoder) throws {
+  846|      3|        try encodeClosure(encoder)
+  847|      3|    }
+  848|       |
+  849|       |}
+

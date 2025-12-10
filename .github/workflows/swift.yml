@@ -1,22 +1,32 @@
-name: Swift
+name: Swift CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, develop ]
 
 jobs:
-  build:
-    runs-on: macos-latest
+  test:
+    name: Test and Coverage
+    runs-on: macos-15
     
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
     
     - name: Setup Swift
-      uses: swift-actions/setup-swift@v1
+      uses: swift-actions/setup-swift@v2
       with:
         swift-version: "6.0"
+    
+    - name: Cache Swift packages
+      uses: actions/cache@v4
+      with:
+        path: .build
+        key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+        restore-keys: |
+          ${{ runner.os }}-spm-
     
     - name: Build
       run: swift build
@@ -24,8 +34,125 @@ jobs:
     - name: Run tests with coverage
       run: swift test --enable-code-coverage
     
-    - name: Generate and check code coverage
-      run: ./scripts/coverage.sh
+    - name: Find coverage data
+      id: coverage
+      run: |
+        PROFDATA=$(find .build -name "*.profdata" | head -1)
+        if [ -z "$PROFDATA" ]; then
+          echo "❌ No coverage data found"
+          find .build -type f -name "*.profdata" || echo "No profdata files"
+          exit 1
+        fi
+        echo "profdata=$PROFDATA" >> $GITHUB_OUTPUT
+        echo "📊 Coverage data: $PROFDATA"
+    
+    - name: Find test binary
+      id: binary
+      run: |
+        # Try multiple paths for test binary
+        TEST_BINARY=""
+        
+        # Method 1: xctest bundle
+        TEST_BINARY=$(find .build -path "*/EKNetworkPackageTests.xctest/Contents/MacOS/EKNetworkPackageTests" 2>/dev/null | head -1)
+        
+        # Method 2: Direct binary
+        if [ -z "$TEST_BINARY" ]; then
+          TEST_BINARY=$(find .build -name "*PackageTests" -type f -perm +111 2>/dev/null | grep -v ".dSYM" | head -1)
+        fi
+        
+        # Method 3: Any test binary
+        if [ -z "$TEST_BINARY" ]; then
+          TEST_BINARY=$(find .build -name "*Tests" -type f -perm +111 2>/dev/null | grep -v ".dSYM" | head -1)
+        fi
+        
+        if [ -z "$TEST_BINARY" ]; then
+          echo "❌ Test binary not found"
+          echo "Searching in .build:"
+          find .build -type f -perm +111 2>/dev/null | head -10 || true
+          exit 1
+        fi
+        
+        echo "binary=$TEST_BINARY" >> $GITHUB_OUTPUT
+        echo "🧪 Test binary: $TEST_BINARY"
+    
+    - name: Generate coverage report
+      run: |
+        PROFDATA="${{ steps.coverage.outputs.profdata }}"
+        TEST_BINARY="${{ steps.binary.outputs.binary }}"
+        
+        # Detect architecture
+        ARCH=$(uname -m)
+        if [ "$ARCH" = "arm64" ]; then
+          ARCH_FLAG="-arch arm64"
+        else
+          ARCH_FLAG="-arch x86_64"
+        fi
+        
+        echo "📈 Generating coverage report..."
+        xcrun llvm-cov show \
+          -instr-profile "$PROFDATA" \
+          "$TEST_BINARY" \
+          $ARCH_FLAG \
+          -format=text \
+          -ignore-filename-regex=".*Tests.*|.*Version\.swift" \
+          > coverage_report.txt 2>&1 || {
+          echo "⚠️ Coverage report generation had issues, but continuing..."
+          echo "PROFDATA: $PROFDATA"
+          echo "TEST_BINARY: $TEST_BINARY"
+          echo "ARCH: $ARCH"
+          ls -la "$PROFDATA" || true
+          ls -la "$TEST_BINARY" || true
+        }
+    
+    - name: Calculate coverage
+      id: calc
+      run: |
+        if [ ! -f coverage_report.txt ]; then
+          echo "❌ Coverage report not found"
+          exit 1
+        fi
+        
+        # llvm-cov format: "    line_number|execution_count|code"
+        # Count lines with execution data (lines that have |)
+        TOTAL_LINES=$(grep -E "^[[:space:]]*[0-9]+\|[[:space:]]*[0-9]+\|" coverage_report.txt 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+        # Count covered lines (execution count > 0)
+        COVERED_LINES=$(grep -E "^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|" coverage_report.txt 2>/dev/null | wc -l | tr -d ' ' || echo "0")
+        
+        if [ "$TOTAL_LINES" -eq 0 ]; then
+          echo "⚠️ No lines found in coverage report"
+          echo "First 20 lines of report:"
+          head -20 coverage_report.txt || true
+          exit 1
+        fi
+        
+        # Calculate percentage
+        COVERAGE=$(awk "BEGIN {printf \"%.2f\", ($COVERED_LINES * 100) / $TOTAL_LINES}")
+        COVERAGE_INT=$(echo "$COVERAGE" | cut -d. -f1)
+        
+        echo "total=$TOTAL_LINES" >> $GITHUB_OUTPUT
+        echo "covered=$COVERED_LINES" >> $GITHUB_OUTPUT
+        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+        echo "coverage_int=$COVERAGE_INT" >> $GITHUB_OUTPUT
+        
+        echo ""
+        echo "✅ Code Coverage Report"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "Total lines:     $TOTAL_LINES"
+        echo "Covered lines:   $COVERED_LINES"
+        echo "Coverage:        ${COVERAGE}%"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    - name: Check coverage threshold
+      run: |
+        COVERAGE_INT="${{ steps.calc.outputs.coverage_int }}"
+        COVERAGE="${{ steps.calc.outputs.coverage }}"
+        
+        if [ "$COVERAGE_INT" -lt 98 ]; then
+          echo "❌ Code coverage is ${COVERAGE}%, but required minimum is 98%"
+          exit 1
+        else
+          echo "✅ Code coverage is ${COVERAGE}% (meets 98% requirement)"
+        fi
     
     - name: Upload coverage report
       uses: actions/upload-artifact@v4
@@ -34,4 +161,3 @@ jobs:
         name: coverage-report
         path: coverage_report.txt
         retention-days: 30
-
