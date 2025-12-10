@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.1] - 2025-XX-XX
+## [1.2.1] - 2025-11-02
 
 ### Added
 - Swift 6.0 language version requirement
@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.2.0] - 2025-XX-XX
+## [1.2.0] - 2025-11-02
 
 ### Added
 - **Progress Tracking**: Full support for upload and download progress tracking
@@ -76,21 +76,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.1.2] - 2025-XX-XX
+## [1.1.2] - 2025-11-02
 
 ### Fixed
 - Minor bug fixes and stability improvements
 
 ---
 
-## [1.1.1] - 2025-XX-XX
+## [1.1.1] - 2025-11-02
 
 ### Fixed
 - Bug fixes and stability improvements
 
 ---
 
-## [1.1.0] - 2025-XX-XX
+## [1.1.0] - 2025-10-31
 
 ### Added
 - **Multipart Form Data Support**: Full support for file uploads
@@ -117,14 +117,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.0.1] - 2025-XX-XX
+## [1.0.1] - 2025-08-20
 
 ### Fixed
 - Initial bug fixes and stability improvements
 
 ---
 
-## [1.0.0] - 2025-06-10
+## [1.0.0] - 2025-06-15
 
 ### Added
 - **Initial Release**: First stable version of EKNetwork
