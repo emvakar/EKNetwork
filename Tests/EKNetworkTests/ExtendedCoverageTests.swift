@@ -215,13 +215,20 @@ func testEmptyResponseEquality() async throws {
 
 // MARK: - HTTPMethod Additional Tests
 
-@Test("HTTPMethod raw values")
-func testHTTPMethodRawValues() async throws {
-    #expect(HTTPMethod.get.rawValue == "GET")
-    #expect(HTTPMethod.post.rawValue == "POST")
-    #expect(HTTPMethod.put.rawValue == "PUT")
-    #expect(HTTPMethod.delete.rawValue == "DELETE")
-    #expect(HTTPMethod.patch.rawValue == "PATCH")
+@Test("HTTPMethod raw values validation")
+func testHTTPMethodRawValuesValidation() async throws {
+    // Verify all HTTP methods have correct raw values
+    let methods: [(HTTPMethod, String)] = [
+        (.get, "GET"),
+        (.post, "POST"),
+        (.put, "PUT"),
+        (.delete, "DELETE"),
+        (.patch, "PATCH")
+    ]
+    
+    for (method, expected) in methods {
+        #expect(method.rawValue == expected)
+    }
 }
 
 // MARK: - NetworkError Additional Tests
