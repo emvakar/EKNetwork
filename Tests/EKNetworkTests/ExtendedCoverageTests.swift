@@ -226,12 +226,15 @@ func testHTTPMethodRawValues() async throws {
 
 // MARK: - NetworkError Additional Tests
 
-@Test("NetworkError cases are distinct")
+@Test("NetworkError cases are accessible")
 func testNetworkErrorCases() async throws {
-    #expect(NetworkError.invalidURL is NetworkError)
-    #expect(NetworkError.invalidResponse is NetworkError)
-    #expect(NetworkError.unauthorized is NetworkError)
-    #expect(NetworkError.conflictingBodyTypes is NetworkError)
+    let errors: [NetworkError] = [
+        .invalidURL,
+        .invalidResponse,
+        .unauthorized,
+        .conflictingBodyTypes
+    ]
+    #expect(errors.count == 4)
 }
 
 // MARK: - Integration Tests
