@@ -190,15 +190,15 @@ func testUserAgentConfigurationFormat() async throws {
 
 // MARK: - StatusCodeResponse Additional Tests
 
-@Test("StatusCodeResponse initializes correctly")
-func testStatusCodeResponseInit() async throws {
+@Test("StatusCodeResponse initializes correctly with headers")
+func testStatusCodeResponseInitWithHeaders() async throws {
     let response = StatusCodeResponse(statusCode: 201, headers: ["X-Custom": "value"])
     #expect(response.statusCode == 201)
     #expect(response.headers["X-Custom"] == "value")
 }
 
-@Test("StatusCodeResponse with empty headers")
-func testStatusCodeResponseEmptyHeaders() async throws {
+@Test("StatusCodeResponse with empty headers dictionary")
+func testStatusCodeResponseEmptyHeadersDict() async throws {
     let response = StatusCodeResponse(statusCode: 204, headers: [:])
     #expect(response.statusCode == 204)
     #expect(response.headers.isEmpty)
@@ -206,8 +206,8 @@ func testStatusCodeResponseEmptyHeaders() async throws {
 
 // MARK: - EmptyResponse Additional Tests
 
-@Test("EmptyResponse equality")
-func testEmptyResponseEquality() async throws {
+@Test("EmptyResponse equality check")
+func testEmptyResponseEqualityCheck() async throws {
     let response1 = EmptyResponse()
     let response2 = EmptyResponse()
     #expect(response1 == response2)
