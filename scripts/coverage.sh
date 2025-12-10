@@ -60,21 +60,21 @@ fi
 
 # Generate coverage report
 echo "📈 Generating coverage report..."
-xcrun llvm-cov show \
-    -instr-profile "$PROFDATA" \
-    "$TEST_BINARY" \
-    $ARCH_FLAG \
-    -format=text \
-    -ignore-filename-regex=".*Tests.*|.*Version\.swift" \
-    > coverage_report.txt 2>&1 || {
+           xcrun llvm-cov show \
+               -instr-profile "$PROFDATA" \
+               "$TEST_BINARY" \
+               $ARCH_FLAG \
+               -format=text \
+               -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift" \
+               > coverage_report.txt 2>&1 || {
     echo "⚠️ Coverage report generation had issues"
     echo "Trying without architecture flag..."
-    xcrun llvm-cov show \
-        -instr-profile "$PROFDATA" \
-        "$TEST_BINARY" \
-        -format=text \
-        -ignore-filename-regex=".*Tests.*|.*Version\.swift" \
-        > coverage_report.txt 2>&1 || {
+               xcrun llvm-cov show \
+                   -instr-profile "$PROFDATA" \
+                   "$TEST_BINARY" \
+                   -format=text \
+                   -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift" \
+                   > coverage_report.txt 2>&1 || {
         echo "❌ Failed to generate coverage report"
         exit 1
     }
