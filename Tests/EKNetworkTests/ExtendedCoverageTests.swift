@@ -58,14 +58,14 @@ func testNetworkManagerUpdateBaseURL() async throws {
 @Test("RequestBody raw data with custom contentType")
 func testRequestBodyRawDataCustomContentType() async throws {
     let data = "raw data".data(using: .utf8)!
-    let body = RequestBody(raw: data, contentType: "text/plain")
+    let body = RequestBody.raw(data, contentType: "text/plain")
     #expect(body.contentType == "text/plain")
 }
 
 @Test("RequestBody stream with custom contentType")
 func testRequestBodyStreamCustomContentType() async throws {
     let stream = InputStream(data: "stream".data(using: .utf8)!)
-    let body = RequestBody(stream: stream, contentType: "application/octet-stream")
+    let body = RequestBody.stream(stream, contentType: "application/octet-stream")
     #expect(body.contentType == "application/octet-stream")
 }
 
@@ -77,11 +77,16 @@ func testRequestBodyFormURLEncodedEmpty() async throws {
 
 // MARK: - MultipartFormData Additional Tests
 
-@Test("MultipartFormData with empty parts")
-func testMultipartFormDataEmptyParts() async throws {
-    let multipart = MultipartFormData(parts: [])
+@Test("MultipartFormData with single part")
+func testMultipartFormDataSinglePart() async throws {
+    let part = MultipartFormData.Part(
+        name: "field",
+        data: "value".data(using: .utf8)!,
+        mimeType: "text/plain"
+    )
+    let multipart = MultipartFormData(parts: [part])
     let data = multipart.encodedData()
-    #expect(!data.isEmpty) // Should have boundary even with no parts
+    #expect(!data.isEmpty)
 }
 
 @Test("MultipartFormData with special characters in field name")
