@@ -640,7 +640,7 @@ func testSignIn() async throws {
 
 ## 🧪 Testing
 
-EKNetwork has comprehensive test coverage (21 tests) and provides protocols for easy testing:
+EKNetwork has comprehensive test coverage (61 tests) and provides protocols for easy testing:
 
 - ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH)
 - ✅ Query parameters
@@ -652,11 +652,31 @@ EKNetwork has comprehensive test coverage (21 tests) and provides protocols for 
 - ✅ User-Agent configuration
 - ✅ Content-Length headers
 
-Run tests:
+### Running Tests
+
+Run all tests:
 
 ```bash
 swift test
 ```
+
+### Code Coverage
+
+Check code coverage locally:
+
+```bash
+./scripts/coverage.sh
+```
+
+This will:
+1. Run tests with coverage enabled
+2. Generate a coverage report
+3. Display coverage percentage
+4. Check if coverage meets the 98% requirement
+
+For detailed coverage information, see [README_COVERAGE.md](README_COVERAGE.md).
+
+**Note:** Coverage is automatically checked in CI/CD on every push and pull request.
 
 ---
 
