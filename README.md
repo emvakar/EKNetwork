@@ -752,6 +752,15 @@ For developers wishing to contribute, see [PROJECT_STRUCTURE.md](PROJECT_STRUCTU
 
 For planned improvements and known issues, see [ROADMAP.md](ROADMAP.md).
 
+## 📋 Summary for Potential Clients
+
+For a comprehensive overview of EKNetwork's features, benefits, and use cases, see [SUMMARY.md](SUMMARY.md). This document helps potential users understand:
+- Key value propositions
+- Feature comparison with alternatives
+- Production readiness
+- Migration paths
+- Getting started guide
+
 ---
 
 <div align="center">
