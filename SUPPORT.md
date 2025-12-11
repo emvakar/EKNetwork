@@ -47,7 +47,7 @@ Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md).
 
 **DO NOT create public Issues for security problems!**
 
-Instead, please send an email to **security@eknetwork.dev** or follow the instructions in [SECURITY.md](SECURITY.md).
+Instead, please send an email to **emvakar@gmail.com** or follow the instructions in [SECURITY.md](SECURITY.md).
 
 ## 💡 Suggesting a New Feature
 
@@ -85,6 +85,6 @@ For questions that are not suitable for public discussion, you can contact us by
 - 📚 Проверьте документацию перед заданием вопроса
 - 💬 Используйте GitHub Discussions для общих вопросов
 - 🐛 Создайте Issue для сообщений об ошибках
-- 🔒 Для проблем безопасности отправьте email на security@eknetwork.dev
+- 🔒 Для проблем безопасности отправьте email на emvakar@gmail.com
 
 Подробнее см. английскую версию выше.
