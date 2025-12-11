@@ -126,46 +126,6 @@ Then add the product to your target:
 4. Click **Add Package**
 5. Select the `EKNetwork` product and add it to your target
 
-### CocoaPods
-
-Add EKNetwork to your `Podfile`:
-
-```ruby
-platform :ios, '18.0'
-platform :macos, '15.0'
-
-target 'YourApp' do
-  use_frameworks!
-  pod 'EKNetwork', '~> 1.4.0'
-end
-```
-
-Then run:
-
-```bash
-pod install
-```
-
-**Note:** CocoaPods support requires a `.podspec` file. If you need CocoaPods support, please open an issue.
-
-### Carthage
-
-Add EKNetwork to your `Cartfile`:
-
-```
-github "emvakar/EKNetwork" ~> 1.4.0
-```
-
-Then run:
-
-```bash
-carthage update
-```
-
-Drag `EKNetwork.framework` from `Carthage/Build` into your Xcode project.
-
-**Note:** Carthage support requires a shared scheme. If you need Carthage support, please open an issue.
-
 ### Manual Installation
 
 1. Clone the repository:
