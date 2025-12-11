@@ -188,7 +188,7 @@ This release represents a major milestone in EKNetwork's evolution, focusing on 
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.3.0")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.0")
 ]
 ```
 

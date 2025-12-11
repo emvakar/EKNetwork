@@ -77,7 +77,7 @@ EKNetwork is a **modern, type-safe HTTP networking library** for Swift applicati
 ```swift
 // 1. Add to Package.swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.2.2")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.0")
 ]
 
 // 2. Define your request
