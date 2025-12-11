@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2025-12-10
+
+### Added
+- **CI/CD Integration**: Added GitHub Actions CI/CD workflow with automated testing and code coverage
+  - Dynamic CI badges in README showing real-time build status
+  - Automated test count extraction and reporting
+  - Code coverage reporting and validation (99.42% threshold)
+- **Swift 6.0 Compatibility**: Full support for Swift 6.0 strict concurrency
+  - Added `Sendable` conformance to `StatusCodeResponse` and `EmptyResponse`
+  - Updated `Package.swift` to use `swiftLanguageModes` instead of deprecated `swiftLanguageVersions`
+  - Fixed all strict concurrency warnings and errors
+
+### Fixed
+- **Swift 6.0 Strict Concurrency**: Resolved all strict concurrency errors
+  - Added `@unchecked Sendable` conformance to response types for Swift 6 compatibility
+  - Fixed data race warnings in tests
+- **Test Compilation**: Fixed all test compilation errors
+  - Corrected `RequestBody` initializer calls
+  - Fixed `MultipartFormData` usage patterns
+  - Resolved duplicate test name conflicts
+- **Documentation**: Updated contact information
+  - Unified email addresses to `emvakar@gmail.com` across all documentation
+  - Added contact email to CODE_OF_CONDUCT.md
+
+### Changed
+- **Package Configuration**: Updated to use modern Swift Package Manager API
+  - Replaced deprecated `swiftLanguageVersions` with `swiftLanguageModes`
+- **Code Organization**: Improved test organization
+  - Added test suites for better test organization
+  - Improved test structure and naming
+
+### Technical Details
+- Total test count: 115 tests (all passing)
+- Code coverage: 99.42% (340/342 lines)
+- Swift version: 6.0
+- CI/CD: Fully automated with GitHub Actions
+
 ## [1.3.3] - 2025-12-10
 
 ### Fixed
@@ -152,6 +189,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **API Design**: Redesigned API for better type safety and Swift concurrency
 - **NetworkManager**: Complete rewrite with modern Swift patterns
+
+## Summary of Changes Since 1.2.0
+
+### Major Features Added (1.2.1 → 1.4.0)
+1. **Query Parameters & Stream Support** (1.2.1)
+2. **Form URL Encoded & Multipart Data** (1.2.2)
+3. **Progress Tracking** (1.2.2)
+4. **Enhanced Retry Policy** (1.2.2)
+5. **Automatic Token Refresh** (1.2.2)
+6. **Custom Error Decoders** (1.2.2)
+7. **User-Agent Configuration** (1.2.2)
+8. **Comprehensive Documentation** (1.3.0)
+9. **Open Source Infrastructure** (1.3.0)
+10. **99.42% Code Coverage** (1.3.1)
+11. **CI/CD Integration** (1.4.0)
+12. **Swift 6.0 Full Compatibility** (1.4.0)
+
+### Infrastructure Improvements
+- Complete open source project setup with all standard files
+- GitHub Actions CI/CD with automated testing
+- Professional documentation in English and Russian
+- Comprehensive test suite (115 tests)
+- Code coverage reporting and validation
+
+### Breaking Changes
+None. All changes are backward compatible.
+
+### Migration Guide
+No migration required. All changes are additive and backward compatible.
+
+---
 
 ## [1.1.0] - 2025-08-10
 
