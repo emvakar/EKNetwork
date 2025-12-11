@@ -93,7 +93,11 @@ struct GetUserRequest: NetworkRequest {
 
 ## 📦 Installation
 
-### Swift Package Manager
+EKNetwork supports multiple installation methods. Choose the one that best fits your project.
+
+### Swift Package Manager (Recommended)
+
+#### Using Package.swift
 
 Add EKNetwork to your project dependencies in `Package.swift`:
 
@@ -102,11 +106,6 @@ dependencies: [
     .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.0")
 ]
 ```
-
-Or via Xcode:
-1. File → Add Packages...
-2. Enter the repository URL
-3. Select version
 
 Then add the product to your target:
 
@@ -119,11 +118,82 @@ Then add the product to your target:
 )
 ```
 
+#### Using Xcode
+
+1. In Xcode, select **File** → **Add Packages...**
+2. Enter the repository URL: `https://github.com/emvakar/EKNetwork.git`
+3. Select **Up to Next Major Version** with `1.4.0`
+4. Click **Add Package**
+5. Select the `EKNetwork` product and add it to your target
+
+### CocoaPods
+
+Add EKNetwork to your `Podfile`:
+
+```ruby
+platform :ios, '18.0'
+platform :macos, '15.0'
+
+target 'YourApp' do
+  use_frameworks!
+  pod 'EKNetwork', '~> 1.4.0'
+end
+```
+
+Then run:
+
+```bash
+pod install
+```
+
+**Note:** CocoaPods support requires a `.podspec` file. If you need CocoaPods support, please open an issue.
+
+### Carthage
+
+Add EKNetwork to your `Cartfile`:
+
+```
+github "emvakar/EKNetwork" ~> 1.4.0
+```
+
+Then run:
+
+```bash
+carthage update
+```
+
+Drag `EKNetwork.framework` from `Carthage/Build` into your Xcode project.
+
+**Note:** Carthage support requires a shared scheme. If you need Carthage support, please open an issue.
+
+### Manual Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/emvakar/EKNetwork.git
+   cd EKNetwork
+   ```
+
+2. Open `Package.swift` in Xcode:
+   ```bash
+   open Package.swift
+   ```
+
+3. Build the framework:
+   - Select the `EKNetwork` scheme
+   - Build (⌘B)
+
+4. Drag the built framework into your project:
+   - Find the framework in `DerivedData` or build products
+   - Drag it into your project's **Frameworks** folder
+   - Make sure **Copy items if needed** is checked
+
 ### Requirements
 
 - **Swift**: 6.0+
 - **iOS**: 18.0+
 - **macOS**: 15.0+
+- **Xcode**: 16.0+ (for Swift 6.0 support)
 
 ---
 
