@@ -457,7 +457,7 @@ open class NetworkManager: NetworkManaging {
 
     /// The base URL that all request paths will be appended to.
     /// Can be changed dynamically using `updateBaseURL(_:)` method.
-    private(set) public var baseURL: URL
+    private(set) public var baseURL: () -> URL
     private let session: URLSessionProtocol
     /// Optional token refresher to handle authentication token renewal.
     public var tokenRefresher: TokenRefreshProvider?
@@ -473,7 +473,7 @@ open class NetworkManager: NetworkManaging {
     ///   - loggerSubsystem: The subsystem identifier used for the `Logger` instance. Defaults to "com.yourapp.networking".
     ///   - userAgentConfiguration: Optional User-Agent configuration. If provided, User-Agent header will be automatically set for all requests. If nil, User-Agent is not set.
     public init(
-        baseURL: URL,
+        baseURL: @escaping (() -> URL),
         session: URLSessionProtocol = URLSession.shared,
         loggerSubsystem: String = "com.yourapp.networking",
         userAgentConfiguration: UserAgentConfiguration? = nil
@@ -482,15 +482,6 @@ open class NetworkManager: NetworkManaging {
         self.session = session
         self.userAgentConfiguration = userAgentConfiguration
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
-    }
-
-    /// Updates the base URL for all subsequent network requests.
-    /// - Parameter newBaseURL: The new base URL to use.
-    /// - Note: This change takes effect immediately for all new requests.
-    ///         Requests that are currently in progress will still use the old base URL.
-    public func updateBaseURL(_ newBaseURL: URL) {
-        logger.info("🔄 [NETWORK] Base URL updated from \(self.baseURL.absoluteString, privacy: .public) to \(newBaseURL.absoluteString, privacy: .public)")
-        self.baseURL = newBaseURL
     }
 
     /// Sends a network request and decodes the response.
@@ -524,7 +515,7 @@ open class NetworkManager: NetworkManaging {
         let currentBaseURL = baseURL
         
         // Construct URLComponents based on baseURL and request path.
-        guard var urlComponents = URLComponents(url: currentBaseURL.appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
+        guard var urlComponents = URLComponents(url: currentBaseURL().appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
             throw NetworkError.invalidURL
         }
         // Append query parameters if provided.
