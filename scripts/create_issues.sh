@@ -100,23 +100,8 @@ create_issue "[BUG] Force Unwrap in MultipartFormData" "$ISSUE2_BODY" '"bug", "m
 # Medium Priority Issues
 echo -e "\n${YELLOW}Creating Medium Priority Issues...${NC}"
 
-ISSUE3_BODY="## Problem
-The \`updateBaseURL\` method is not synchronized. If called from different threads simultaneously with request execution, race conditions may occur.
-
-## Location
-\`NetworkManager.swift:592-595\`
-
-## Solution
-- Use \`actor\` or \`NSLock\` for synchronization
-- Or make \`NetworkManager\` an actor
-
-## Priority
-Medium - Partially solved by capturing \`currentBaseURL\`
-
-## Related
-See ROADMAP.md for full details"
-
-create_issue "[BUG] Race Condition in updateBaseURL" "$ISSUE3_BODY" '"bug", "medium-priority"'
+# Issue #3 (Race Condition in updateBaseURL) — RESOLVED in v1.4.1: baseURL is now a closure, updateBaseURL removed.
+# create_issue "[BUG] Race Condition in updateBaseURL" "$ISSUE3_BODY" '"bug", "medium-priority"'
 
 ISSUE4_BODY="## Problem
 In line 507, \`String(describing: type(of: \$0))\` is used for type checking. This is an unreliable way to check types.

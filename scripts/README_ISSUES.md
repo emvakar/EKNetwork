@@ -40,7 +40,7 @@ The script creates the following issues:
 2. Force Unwrap in MultipartFormData
 
 ### Medium Priority Issues
-3. Race Condition in updateBaseURL
+3. ~~Race Condition in updateBaseURL~~ — Resolved in v1.4.1 (baseURL is now a closure)
 4. Unsafe String(describing:) Usage in RetryPolicy
 5. Missing Task Cancellation Handling in Retry Logic
 

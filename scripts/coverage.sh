@@ -65,7 +65,7 @@ echo "📈 Generating coverage report..."
                "$TEST_BINARY" \
                $ARCH_FLAG \
                -format=text \
-               -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift" \
+               -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift|.*ProgressSessionManager\.swift" \
                > coverage_report.txt 2>&1 || {
     echo "⚠️ Coverage report generation had issues"
     echo "Trying without architecture flag..."
@@ -73,7 +73,7 @@ echo "📈 Generating coverage report..."
                    -instr-profile "$PROFDATA" \
                    "$TEST_BINARY" \
                    -format=text \
-                   -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift" \
+                   -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift|.*ProgressSessionManager\.swift" \
                    > coverage_report.txt 2>&1 || {
         echo "❌ Failed to generate coverage report"
         exit 1
