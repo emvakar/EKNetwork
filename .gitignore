@@ -99,7 +99,12 @@ iOSInjectionProject/
 # Swift
 *.swiftpm
 .gitlab-release.env
+.cursor
 
 # Analysis and internal documentation (not for public commit)
 ANALYSIS.md
 ANALYSIS_REPORT.md
+
+# Internal improvement and release docs (not for public repo)
+docs/improvements/
+docs/internal_use/
