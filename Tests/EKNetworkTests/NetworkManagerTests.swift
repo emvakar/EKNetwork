@@ -2,7 +2,7 @@
 //  NetworkManagerTests.swift
 //  EKNetworkTests
 //
-//  Created by Emil Karimov on 10.06.2025.
+//  Created by Emil Karimov on 11.06.2025.
 //  Copyright © 2025 Emil Karimov. All rights reserved.
 //
 
@@ -67,7 +67,7 @@ func testURLFormationAndValue() async throws {
     config.protocolClasses = [URLCheckingSession.self]
     let base = URL(string: "https://unit.test")!
     URLCheckingSession.urlBox = urlBox
-    let manager = NetworkManager(baseURL: base, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { base }, session: URLSession(configuration: config))
     let result = try await manager.send(MockRequest(), accessToken: nil)
     let lastURL = urlBox.get()
     #expect(result == MockResponse(value: "result"), "Manager should decode the response correctly")
@@ -93,7 +93,7 @@ func testStatusOnlyResponse() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StatusOnlyProtocol.self]
     let base = URL(string: "https://unit.test")!
-    let manager = NetworkManager(baseURL: base, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { base }, session: URLSession(configuration: config))
     let response = try await manager.send(StatusOnlyRequest(), accessToken: nil)
     #expect(response.statusCode == 204, "Should surface HTTP status code if body is empty")
     #expect(response.headers["X-Debug"] == "true", "Headers should be preserved")
@@ -116,7 +116,7 @@ func testEmptyResponseHandling() async throws {
 
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [EmptyProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://unit.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://unit.test")! }, session: URLSession(configuration: config))
     let result = try await manager.send(EmptyRequest(), accessToken: nil)
     #expect(result == EmptyResponse(), "Empty responses should not throw when body is empty")
 }
@@ -159,7 +159,7 @@ func testAuthorizationHeaderNotOverwritten() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [CaptureProtocol.self]
     CaptureProtocol.headerBox = headerBox
-    let manager = NetworkManager(baseURL: URL(string: "https://unit.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://unit.test")! }, session: URLSession(configuration: config))
     let tokenProvider: @Sendable () -> String? = { "ignored" }
     let response = try await manager.send(AuthRequest(), accessToken: tokenProvider)
     #expect(response.ok, "Should decode payload")
@@ -232,7 +232,7 @@ func testCustomJSONEncoderUsage() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [EncoderProtocol.self]
     EncoderProtocol.bodyBox = bodyBox
-    let manager = NetworkManager(baseURL: URL(string: "https://unit.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://unit.test")! }, session: URLSession(configuration: config))
     let response = try await manager.send(EncoderRequest(), accessToken: nil)
     #expect(response.ok, "Should decode payload")
     let body = try #require(bodyBox.get(), "Body should be captured")
@@ -245,19 +245,20 @@ func testCustomJSONEncoderUsage() async throws {
 @Test("baseURL can be read")
 func testBaseURLCanBeRead() async throws {
     let base = URL(string: "https://api.example.com")!
-    let manager = NetworkManager(baseURL: base)
-    #expect(manager.baseURL == base, "Should be able to read the base URL")
+    let manager = NetworkManager(baseURL: { base })
+    #expect(manager.baseURL() == base, "Should be able to read the base URL")
 }
 
 @MainActor
-@Test("baseURL can be updated and affects subsequent requests")
-func testBaseURLUpdate() async throws {
+@Test("baseURL closure is invoked per request so dynamic URL works")
+func testBaseURLClosureInvokedPerRequest() async throws {
     final class URLBox: @unchecked Sendable {
         private var urls: [URL] = []
         func add(_ url: URL) { urls.append(url) }
         func getAll() -> [URL] { urls }
     }
     let urlBox = URLBox()
+    var currentBase = URL(string: "https://api-v1.example.com")!
 
     class URLTrackingSession: URLProtocol {
         static let data: Data = {
@@ -279,19 +280,14 @@ func testBaseURLUpdate() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [URLTrackingSession.self]
-    let initialBase = URL(string: "https://api-v1.example.com")!
     URLTrackingSession.urlBox = urlBox
-    let manager = NetworkManager(baseURL: initialBase, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { currentBase }, session: URLSession(configuration: config))
     
     // First request with initial base URL
     _ = try await manager.send(MockRequest(), accessToken: nil)
     
-    // Update base URL
-    let newBase = URL(string: "https://api-v2.example.com")!
-    manager.updateBaseURL(newBase)
-    
-    // Verify base URL was updated
-    #expect(manager.baseURL == newBase, "Base URL should be updated")
+    // Change base URL (closure will return new value on next call)
+    currentBase = URL(string: "https://api-v2.example.com")!
     
     // Second request with new base URL
     _ = try await manager.send(MockRequest(), accessToken: nil)
@@ -343,7 +339,7 @@ func testQueryParameters() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [QueryProtocol.self]
     QueryProtocol.urlBox = urlBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     _ = try await manager.send(QueryRequest(), accessToken: nil)
     
     let url = try #require(urlBox.get())
@@ -391,7 +387,7 @@ func testFormURLEncodedBody() async throws {
         }
     }
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: MockSession(bodyBox: bodyBox))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: MockSession(bodyBox: bodyBox))
     _ = try await manager.send(FormRequest(), accessToken: nil)
     
     let contentType = try #require(bodyBox.getContentType())
@@ -444,7 +440,7 @@ func testMultipartFormData() async throws {
         }
     }
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: MockSession(bodyBox: bodyBox))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: MockSession(bodyBox: bodyBox))
     _ = try await manager.send(MultipartRequest(), accessToken: nil)
     
     let contentType = try #require(bodyBox.getContentType())
@@ -476,24 +472,23 @@ func testConflictingBodyTypes() async throws {
         }
     }
     
-    class ErrorProtocol: URLProtocol {
-        override class func canInit(with request: URLRequest) -> Bool { true }
-        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-        override func startLoading() {
-            // Should not reach here
+    // Use a session that records if data(for:) is called — it must not be, since we throw before sending
+    final class NoSendSession: URLSessionProtocol, @unchecked Sendable {
+        var dataForWasCalled = false
+        func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+            dataForWasCalled = true
+            struct SessionCalledError: Error {}
+            throw SessionCalledError()
         }
-        override func stopLoading() {}
     }
-    
-    let config = URLSessionConfiguration.ephemeral
-    config.protocolClasses = [ErrorProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let noSendSession = NoSendSession()
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: noSendSession)
     
     do {
         _ = try await manager.send(ConflictingRequest(), accessToken: nil)
         Issue.record("Should have thrown NetworkError.conflictingBodyTypes")
     } catch NetworkError.conflictingBodyTypes {
-        // Expected
+        #expect(!noSendSession.dataForWasCalled, "Request must not be sent when body and multipart are both set")
     } catch {
         Issue.record("Unexpected error type: \(error)")
     }
@@ -524,7 +519,7 @@ func testHTTPErrorHandling() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [ErrorProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     do {
         _ = try await manager.send(ErrorRequest(), accessToken: nil)
@@ -573,7 +568,7 @@ func testCustomErrorDecoder() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [ErrorProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     do {
         _ = try await manager.send(ErrorRequest(), accessToken: nil)
@@ -633,7 +628,7 @@ func testRetryPolicy() async throws {
     RetryProtocol.attemptCount?.initialize(to: 0)
     defer { RetryProtocol.attemptCount?.deallocate() }
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     let result = try await manager.send(RetryRequest(), accessToken: nil)
     
     #expect(result.value == "success", "Should succeed after retries")
@@ -691,7 +686,7 @@ func testTokenRefresh() async throws {
     defer { AuthProtocol.requestCount?.deallocate() }
     
     let refresher = MockTokenRefresher()
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     manager.tokenRefresher = refresher
     
     let result = try await manager.send(AuthRequest(), accessToken: nil)
@@ -725,7 +720,7 @@ func testUnauthorizedWithoutRetry() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [AuthProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     do {
         _ = try await manager.send(AuthRequest(), accessToken: nil)
@@ -783,7 +778,7 @@ func testUserAgentConfiguration() async throws {
         osVersion: "14.0"
     )
     let manager = NetworkManager(
-        baseURL: URL(string: "https://api.test")!,
+        baseURL: { URL(string: "https://api.test")! },
         session: URLSession(configuration: config),
         userAgentConfiguration: userAgentConfig
     )
@@ -834,7 +829,7 @@ func testAccessTokenInjection() async throws {
     config.protocolClasses = [TokenProtocol.self]
     TokenProtocol.headerBox = headerBox
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     let tokenProvider: @Sendable () -> String? = { "test-token-123" }
     
     _ = try await manager.send(TokenRequest(), accessToken: tokenProvider)
@@ -883,7 +878,7 @@ func testHTTPMethods() async throws {
         config.protocolClasses = [MethodProtocol.self]
         MethodProtocol.methodBox = methodBox
         
-        let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+        let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
         let request = MethodRequest(method: httpMethod)
         _ = try await manager.send(request, accessToken: nil)
         
@@ -935,7 +930,7 @@ func testRawDataBody() async throws {
         }
     }
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: MockSession(bodyBox: bodyBox))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: MockSession(bodyBox: bodyBox))
     _ = try await manager.send(RawDataRequest(), accessToken: nil)
     
     let contentType = try #require(bodyBox.getContentType())
@@ -986,7 +981,7 @@ func testContentLengthHeader() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [LengthProtocol.self]
     LengthProtocol.headerBox = headerBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     _ = try await manager.send(LengthRequest(), accessToken: nil)
     
     let contentLength = try #require(headerBox.get())

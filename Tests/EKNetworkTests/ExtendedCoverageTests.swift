@@ -18,16 +18,16 @@ struct ExtendedCoverageTestSuite {
 
 @Test("NetworkManager initializes with default session")
 func testNetworkManagerDefaultSession() async throws {
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!)
-    #expect(manager.baseURL.absoluteString == "https://api.test")
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! })
+    #expect(manager.baseURL().absoluteString == "https://api.test")
 }
 
 @Test("NetworkManager initializes with custom session")
 func testNetworkManagerCustomSession() async throws {
     let config = URLSessionConfiguration.ephemeral
     let session = URLSession(configuration: config)
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: session)
-    #expect(manager.baseURL.absoluteString == "https://api.test")
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: session)
+    #expect(manager.baseURL().absoluteString == "https://api.test")
 }
 
 @Test("NetworkManager initializes with user agent configuration")
@@ -41,20 +41,20 @@ func testNetworkManagerWithUserAgent() async throws {
         networkVersion: "1.3.1"
     )
     let manager = NetworkManager(
-        baseURL: URL(string: "https://api.test")!,
+        baseURL: { URL(string: "https://api.test")! },
         userAgentConfiguration: config
     )
-    #expect(manager.baseURL.absoluteString == "https://api.test")
+    #expect(manager.baseURL().absoluteString == "https://api.test")
 }
 
 @MainActor
-@Test("NetworkManager updateBaseURL changes base URL")
-func testNetworkManagerUpdateBaseURL() async throws {
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!)
-    #expect(manager.baseURL.absoluteString == "https://api.test")
-    
-    manager.updateBaseURL(URL(string: "https://api2.test")!)
-    #expect(manager.baseURL.absoluteString == "https://api2.test")
+@Test("NetworkManager baseURL closure returns current URL")
+func testNetworkManagerBaseURLClosure() async throws {
+    var current = URL(string: "https://api.test")!
+    let manager = NetworkManager(baseURL: { current })
+    #expect(manager.baseURL().absoluteString == "https://api.test")
+    current = URL(string: "https://api2.test")!
+    #expect(manager.baseURL().absoluteString == "https://api2.test")
 }
 
 // MARK: - RequestBody Additional Tests
@@ -85,7 +85,7 @@ func testRequestBodyFormURLEncodedEmpty() async throws {
 func testMultipartFormDataSinglePart() async throws {
     var multipart = MultipartFormData()
     multipart.addPart(name: "field", data: "value".data(using: .utf8)!, mimeType: "text/plain")
-    let data = multipart.encodedData()
+    let data = try #require(multipart.encodedData(), "Multipart encoding should succeed")
     #expect(!data.isEmpty)
 }
 
@@ -93,7 +93,7 @@ func testMultipartFormDataSinglePart() async throws {
 func testMultipartFormDataSpecialCharacters() async throws {
     var multipart = MultipartFormData()
     multipart.addPart(name: "field-name_with.special", data: "value".data(using: .utf8)!, mimeType: "text/plain")
-    let data = multipart.encodedData()
+    let data = try #require(multipart.encodedData(), "Multipart encoding should succeed")
     #expect(!data.isEmpty)
 }
 
@@ -284,7 +284,7 @@ func testFullRequestFlowSuccess() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [SuccessProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     let response = try await manager.send(SuccessRequest(), accessToken: nil)
     #expect(response.value == "success")
@@ -325,7 +325,7 @@ func testRequestWithAllOptionalParameters() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [FullProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     let response = try await manager.send(FullRequest(), accessToken: nil)
     #expect(response.value == "full")

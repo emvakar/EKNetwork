@@ -71,7 +71,7 @@ func testMultipartFormDataMultipleParts() async throws {
     multipart.addPart(name: "field1", data: "value1".data(using: .utf8)!, mimeType: "text/plain")
     multipart.addPart(name: "field2", data: "value2".data(using: .utf8)!, mimeType: "text/plain", filename: "file.txt")
     
-    let encoded = multipart.encodedData()
+    let encoded = try #require(multipart.encodedData(), "Multipart encoding should succeed")
     let encodedString = String(data: encoded, encoding: .utf8) ?? ""
     
     #expect(encodedString.contains("field1"))
@@ -85,7 +85,7 @@ func testMultipartFormDataWithoutFilename() async throws {
     var multipart = MultipartFormData()
     multipart.addPart(name: "field", data: "data".data(using: .utf8)!, mimeType: "text/plain")
     
-    let encoded = multipart.encodedData()
+    let encoded = try #require(multipart.encodedData(), "Multipart encoding should succeed")
     let encodedString = String(data: encoded, encoding: .utf8) ?? ""
     
     #expect(encodedString.contains("name=\"field\""))
@@ -123,9 +123,9 @@ func testRetryPolicyDefaultUserAuthenticationRequired() async throws {
     #expect(policy.shouldRetry(error) == false)
 }
 
-@Test("RetryPolicy default shouldRetry returns false for APIError types")
-func testRetryPolicyDefaultAPIError() async throws {
-    struct APIError: Error {}
+@Test("RetryPolicy default shouldRetry returns false for NonRetriableError types")
+func testRetryPolicyDefaultNonRetriableError() async throws {
+    struct APIError: Error, NonRetriableError {}
     let policy = RetryPolicy()
     let error = APIError()
     #expect(policy.shouldRetry(error) == false)
@@ -319,7 +319,7 @@ func testInvalidURLConstruction() async throws {
         var method: HTTPMethod { .get }
     }
     
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!)
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! })
     
     do {
         _ = try await manager.send(InvalidRequest(), accessToken: nil)
@@ -356,7 +356,7 @@ func testEmptyResponseWithoutHandler() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [EmptyProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     do {
         _ = try await manager.send(EmptyRequest(), accessToken: nil)
@@ -397,7 +397,7 @@ func testInvalidResponseType() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [InvalidProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     do {
         _ = try await manager.send(InvalidResponseRequest(), accessToken: nil)
@@ -457,7 +457,7 @@ func testStreamBody() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [StreamProtocol.self]
     StreamProtocol.bodyBox = bodyBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     _ = try await manager.send(StreamRequest(), accessToken: nil)
     
@@ -497,7 +497,7 @@ func testCustomJSONDecoder() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [CustomProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     // This should work with custom decoder
     let response = try await manager.send(CustomDecoderRequest(), accessToken: nil)
@@ -545,7 +545,7 @@ func testAcceptHeaderForJSON() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [AcceptProtocol.self]
     AcceptProtocol.headerBox = headerBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     _ = try await manager.send(JSONRequest(), accessToken: nil)
     
@@ -597,7 +597,7 @@ func testAcceptHeaderNotOverwritten() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [AcceptProtocol.self]
     AcceptProtocol.headerBox = headerBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     _ = try await manager.send(CustomAcceptRequest(), accessToken: nil)
     
@@ -650,7 +650,7 @@ func testRetryPolicyMaxCount() async throws {
     config.protocolClasses = [RetryProtocol.self]
     RetryProtocol.attemptCount = UnsafeMutablePointer<Int>.allocate(capacity: 1)
     RetryProtocol.attemptCount?.initialize(to: 0)
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     // Should fail after max retries
     do {
@@ -698,7 +698,7 @@ func testTokenRefreshFailure() async throws {
     
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [AuthProtocol.self]
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     manager.tokenRefresher = FailingTokenRefresher()
     
     do {
@@ -758,7 +758,7 @@ func testFormURLEncodedSpecialCharacters() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [FormProtocol.self]
     FormProtocol.bodyBox = bodyBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     _ = try await manager.send(SpecialRequest(), accessToken: nil)
     
@@ -820,7 +820,7 @@ func testMultipleQueryParameters() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [QueryProtocol.self]
     QueryProtocol.urlBox = urlBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     _ = try await manager.send(MultiQueryRequest(), accessToken: nil)
     
@@ -884,7 +884,7 @@ func testCustomHeadersOverride() async throws {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [HeaderProtocol.self]
     HeaderProtocol.headerBox = headerBox
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     _ = try await manager.send(CustomHeaderRequest(), accessToken: nil)
     
@@ -978,7 +978,7 @@ func testRetryPolicyShouldRetryClosure() async throws {
     config.protocolClasses = [RetryProtocol.self]
     RetryProtocol.attempt = UnsafeMutablePointer<Int>.allocate(capacity: 1)
     RetryProtocol.attempt?.initialize(to: 0)
-    let manager = NetworkManager(baseURL: URL(string: "https://api.test")!, session: URLSession(configuration: config))
+    let manager = NetworkManager(baseURL: { URL(string: "https://api.test")! }, session: URLSession(configuration: config))
     
     let request = CustomRetryRequest(retryBox: retryBox)
     _ = try await manager.send(request, accessToken: nil)
