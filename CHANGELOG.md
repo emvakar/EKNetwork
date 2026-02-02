@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Security & robustness (from IMPROVEMENTS_AND_ANALYSIS)**:
+  - **MultipartFormData**: `encodedData()` now returns `Data?` (no force unwrap); UTF-8 encoding failures return `nil`. Name and filename in Content-Disposition are escaped (quotes and backslashes). New error `NetworkError.invalidMultipartEncoding` when encoding fails.
+  - **Path normalization**: Request path is normalized (trim slashes, collapse `//`); paths containing `..` are rejected with `NetworkError.invalidURL`.
+  - **NonRetriableError**: New protocol; default `RetryPolicy.shouldRetry` returns `false` for errors conforming to `NonRetriableError` (replaces string-based type name checks).
+  - **Task cancellation**: Retry loop checks `Task.isCancelled` and calls `Task.checkCancellation()`; on cancellation throws `CancellationError`.
+  - **Logging**: Path and error messages in logs use `privacy: .private` to avoid leaking sensitive data.
+  - **Convenience init**: `NetworkManager(baseURL: URL, ...)` convenience initializer for fixed base URL.
+  - **Shared progress session**: New `ProgressSessionManager` with a single shared `URLSession` and delegate for progress requests; progress requests no longer create a new session per request.
+- **Tests**: 10 new tests in `CoverageImprovementsTests.swift` (convenience init, path validation, multipart escaping, NonRetriableError, Task cancellation, etc.). Total **125 tests**, coverage **99.13%** (ProgressSessionManager excluded from coverage like ProgressDelegate).
+
+### Changed
+- **RetryPolicy**: Default `shouldRetry` uses `NonRetriableError` protocol instead of `String(describing: type(of:))`. Custom error types that should not be retried should conform to `NonRetriableError`.
+- **MultipartFormData.encodedData()**: Return type is now `Data?`; callers (e.g. `NetworkManager`) throw `NetworkError.invalidMultipartEncoding` when `nil`.
+
+## [1.4.1] - 2025-12-XX
+
+### Changed
+- **Base URL as closure (breaking)**: `NetworkManager` now accepts base URL as a closure `() -> URL` instead of a stored `URL`.
+  - **Initializer**: `init(baseURL: URL, ...)` → `init(baseURL: @escaping (() -> URL), ...)`.
+  - **Property**: `baseURL: URL` → `baseURL: () -> URL` (read-only; call `baseURL()` to get current URL).
+  - **Removed**: `updateBaseURL(_:)` — no longer needed; pass a closure that returns the desired URL (e.g. from settings or environment) so each request uses the current value without race conditions.
+- **Benefits**: Dynamic base URL per request (e.g. per-environment, A/B, feature flags), no race conditions when “switching” base URL, simpler threading model.
+
+### Added
+- **Swift 6 concurrency**: `NetworkManager` now conforms to `@unchecked Sendable` so it can be used from async contexts (e.g. tests, async/await call sites) without isolation errors; callers must not mutate shared state concurrently.
+
+### Migration (1.4.0 → 1.4.1)
+- Replace `NetworkManager(baseURL: myURL, ...)` with `NetworkManager(baseURL: { myURL }, ...)` or `NetworkManager(baseURL: { URL(string: "https://api.example.com")! }, ...)`.
+- Replace `manager.baseURL` with `manager.baseURL()` where you read the current base URL.
+- Replace `manager.updateBaseURL(newURL)` with providing a closure that returns the current base (e.g. `let currentBase = ...; let manager = NetworkManager(baseURL: { currentBase }, ...)` and update `currentBase` where needed, or use a function/closure that reads from your config).
+
 ## [1.4.0] - 2025-12-11
 
 ### Added
@@ -192,7 +226,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Summary of Changes Since 1.2.0
 
-### Major Features Added (1.2.1 → 1.4.0)
+### Major Features Added (1.2.1 → 1.4.1)
 1. **Query Parameters & Stream Support** (1.2.1)
 2. **Form URL Encoded & Multipart Data** (1.2.2)
 3. **Progress Tracking** (1.2.2)
@@ -205,6 +239,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 10. **99.42% Code Coverage** (1.3.1)
 11. **CI/CD Integration** (1.4.0)
 12. **Swift 6.0 Full Compatibility** (1.4.0)
+13. **Base URL as closure & removal of updateBaseURL** (1.4.1)
 
 ### Infrastructure Improvements
 - Complete open source project setup with all standard files

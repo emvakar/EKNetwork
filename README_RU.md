@@ -157,7 +157,7 @@ struct SignInRequest: NetworkRequest {
 
 ```swift
 let manager = NetworkManager(
-    baseURL: URL(string: "https://api.example.com")!
+    baseURL: { URL(string: "https://api.example.com")! }
 )
 
 let response = try await manager.send(
@@ -270,7 +270,7 @@ class UploadViewModel: ObservableObject {
             }
         }
         
-        let manager = NetworkManager(baseURL: baseURL)
+        let manager = NetworkManager(baseURL: { baseURL })
         _ = try await manager.send(UploadRequest(), accessToken: nil)
     }
 }
@@ -315,7 +315,7 @@ class TokenManager: TokenRefreshProvider {
     }
 }
 
-let manager = NetworkManager(baseURL: baseURL)
+let manager = NetworkManager(baseURL: { baseURL })
 manager.tokenRefresher = TokenManager()
 
 // При получении 401 токен автоматически обновится и запрос повторится
@@ -430,17 +430,19 @@ struct BinaryUploadRequest: NetworkRequest {
 }
 ```
 
-#### Динамическое изменение base URL
+#### Динамический base URL
 
 ```swift
-let manager = NetworkManager(
-    baseURL: URL(string: "https://api.staging.example.com")!
-)
+// Базовый URL вычисляется при каждом запросе через замыкание — без гонок
+var currentBase = URL(string: "https://api.staging.example.com")!
+let manager = NetworkManager(baseURL: { currentBase })
 
-// Переключение на production без пересоздания менеджера
-manager.updateBaseURL(URL(string: "https://api.example.com")!)
-
+// Переключение на production: измените значение, захваченное замыканием
+currentBase = URL(string: "https://api.example.com")!
 // Все последующие запросы будут использовать новый URL
+
+// Или читайте из конфига/окружения
+let manager = NetworkManager(baseURL: { AppConfig.shared.apiBaseURL })
 ```
 
 #### User-Agent конфигурация
@@ -455,7 +457,7 @@ let userAgentConfig = UserAgentConfiguration(
 )
 
 let manager = NetworkManager(
-    baseURL: baseURL,
+    baseURL: { baseURL },
     userAgentConfiguration: userAgentConfig
 )
 // User-Agent будет автоматически добавлен ко всем запросам
@@ -525,7 +527,7 @@ class APIClient {
     private init() {
         let baseURL = URL(string: "https://api.example.com")!
         manager = NetworkManager(
-            baseURL: baseURL,
+            baseURL: { baseURL },
             userAgentConfiguration: UserAgentConfiguration(
                 appName: Bundle.main.appName,
                 appVersion: Bundle.main.appVersion,
@@ -616,7 +618,7 @@ func testSignIn() async throws {
     )
     
     let manager = NetworkManager(
-        baseURL: URL(string: "https://test.com")!,
+        baseURL: { URL(string: "https://test.com")! },
         session: mockSession
     )
     

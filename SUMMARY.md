@@ -89,7 +89,7 @@ struct GetUserRequest: NetworkRequest {
 }
 
 // 3. Send request
-let manager = NetworkManager(baseURL: URL(string: "https://api.example.com")!)
+let manager = NetworkManager(baseURL: { URL(string: "https://api.example.com")! })
 let user = try await manager.send(GetUserRequest(id: 123), accessToken: nil)
 ```
 

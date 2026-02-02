@@ -26,7 +26,7 @@
 
 ```swift
 public init(
-    baseURL: URL,
+    baseURL: @escaping (() -> URL),
     session: URLSessionProtocol = URLSession.shared,
     loggerSubsystem: String = "com.yourapp.networking",
     userAgentConfiguration: UserAgentConfiguration? = nil
@@ -34,15 +34,24 @@ public init(
 ```
 
 **Параметры:**
-- `baseURL`: Базовый URL, к которому будут добавляться пути запросов
+- `baseURL`: Замыкание, возвращающее базовый URL для каждого запроса. Используйте `{ myURL }` для фиксированного URL или замыкание, читающее из конфига/окружения, для динамического базового URL (без гонок при переключении окружений).
 - `session`: `URLSessionProtocol` для выполнения запросов (по умолчанию `URLSession.shared`)
 - `loggerSubsystem`: Идентификатор подсистемы для экземпляра `Logger`
 - `userAgentConfiguration`: Опциональная конфигурация User-Agent
 
+**Пример:**
+```swift
+// Фиксированный базовый URL
+let manager = NetworkManager(baseURL: { URL(string: "https://api.example.com")! })
+
+// Динамический базовый URL (например, из настроек)
+let manager = NetworkManager(baseURL: { AppSettings.shared.apiBaseURL })
+```
+
 ### Свойства
 
-#### `baseURL: URL`
-Базовый URL, к которому будут добавляться пути запросов. Может быть изменен динамически с помощью метода `updateBaseURL(_:)`.
+#### `baseURL: () -> URL`
+Замыкание, возвращающее базовый URL; вызовите `baseURL()` для получения текущего базового URL. Каждый запрос вызывает это замыкание, поэтому URL может меняться между запросами без гонок.
 
 #### `tokenRefresher: TokenRefreshProvider?`
 Опциональный обновлятель токенов для обработки обновления токенов аутентификации. При установке автоматически обновляет токены при ответах 401.
@@ -71,15 +80,6 @@ let response = try await manager.send(
     accessToken: { TokenStore.shared.accessToken }
 )
 ```
-
-#### `updateBaseURL(_ newBaseURL: URL)`
-
-Обновляет базовый URL для всех последующих сетевых запросов.
-
-**Параметры:**
-- `newBaseURL`: Новый базовый URL для использования
-
-**Примечание:** Это изменение вступает в силу немедленно для всех новых запросов. Запросы, которые в настоящее время выполняются, будут по-прежнему использовать старый базовый URL.
 
 ---
 

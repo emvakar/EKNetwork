@@ -34,17 +34,9 @@ This document outlines the planned improvements and known issues for EKNetwork.
 
 ## 🟡 Medium Priority Issues
 
-### Issue #3: Race Condition in updateBaseURL
-**Status:** 🟡 Medium  
-**Location:** `NetworkManager.swift:592-595`
-
-**Problem:** The `updateBaseURL` method is not synchronized, which can cause race conditions.
-
-**Solution:**
-- Use `actor` or `NSLock` for synchronization
-- Or make `NetworkManager` an actor
-
-**Related Issue:** See GitHub issue for details
+### Issue #3: ~~Race Condition in updateBaseURL~~ ✅ Resolved (v1.4.1)
+**Status:** ✅ Resolved  
+**Resolved in:** v1.4.1 — Base URL is now provided via closure `() -> URL`; `updateBaseURL` was removed. Each request calls the closure, so there is no shared mutable base URL and no race condition.
 
 ---
 
@@ -78,17 +70,9 @@ This document outlines the planned improvements and known issues for EKNetwork.
 
 ## 🟢 Low Priority Issues
 
-### Issue #6: Missing URL Validation in updateBaseURL
-**Status:** 🟢 Low  
-**Location:** `NetworkManager.swift:592-595`
-
-**Problem:** The `updateBaseURL` method doesn't validate URL before setting.
-
-**Solution:**
-- Add URL validation
-- Throw error on invalid URL
-
-**Related Issue:** See GitHub issue for details
+### Issue #6: ~~Missing URL Validation in updateBaseURL~~ ✅ N/A (v1.4.1)
+**Status:** ✅ N/A  
+**Resolved in:** v1.4.1 — `updateBaseURL` was removed; base URL is now a closure. Invalid URL from the closure still leads to `NetworkError.invalidURL` when building the request (e.g. when `URLComponents` fails).
 
 ---
 

@@ -26,7 +26,7 @@ The main class for managing network requests.
 
 ```swift
 public init(
-    baseURL: URL,
+    baseURL: @escaping (() -> URL),
     session: URLSessionProtocol = URLSession.shared,
     loggerSubsystem: String = "com.yourapp.networking",
     userAgentConfiguration: UserAgentConfiguration? = nil
@@ -34,15 +34,27 @@ public init(
 ```
 
 **Parameters:**
-- `baseURL`: The base URL that all request paths will be appended to
+- `baseURL`: Closure that returns the base URL for each request. Use `{ myURL }` for a fixed URL or a closure that reads from config/environment for dynamic base URL (avoids race conditions when switching environments).
 - `session`: The `URLSessionProtocol` to use for making requests (defaults to `URLSession.shared`)
 - `loggerSubsystem`: The subsystem identifier for the `Logger` instance
 - `userAgentConfiguration`: Optional User-Agent configuration
 
+**Example:**
+```swift
+// Fixed base URL
+let manager = NetworkManager(baseURL: { URL(string: "https://api.example.com")! })
+
+// Dynamic base URL (e.g. from settings)
+let manager = NetworkManager(baseURL: { AppSettings.shared.apiBaseURL })
+
+// Convenience: fixed base URL (wraps URL in a closure)
+let manager = NetworkManager(baseURL: URL(string: "https://api.example.com")!)
+```
+
 ### Properties
 
-#### `baseURL: URL`
-The base URL that all request paths will be appended to. Can be changed dynamically using `updateBaseURL(_:)`.
+#### `baseURL: () -> URL`
+Closure that provides the base URL; call `baseURL()` to get the current base URL. Each request invokes this closure, so the URL can change between requests without race conditions.
 
 #### `tokenRefresher: TokenRefreshProvider?`
 Optional token refresher to handle authentication token renewal. When set, automatically refreshes tokens on 401 responses.
@@ -71,15 +83,6 @@ let response = try await manager.send(
     accessToken: { TokenStore.shared.accessToken }
 )
 ```
-
-#### `updateBaseURL(_ newBaseURL: URL)`
-
-Updates the base URL for all subsequent network requests.
-
-**Parameters:**
-- `newBaseURL`: The new base URL to use
-
-**Note:** This change takes effect immediately for all new requests. Requests that are currently in progress will still use the old base URL.
 
 ---
 
@@ -244,11 +247,11 @@ Adds a new part to the multipart form data.
 - `mimeType`: MIME type string
 - `filename`: Optional filename
 
-#### `func encodedData() -> Data`
+#### `func encodedData() -> Data?`
 
-Encodes the multipart form data into a Data object suitable for HTTP body.
+Encodes the multipart form data into a Data object suitable for HTTP body. Uses safe UTF-8 encoding and escapes quotes/backslashes in name and filename per RFC 2183.
 
-**Returns:** Encoded Data representing the multipart form
+**Returns:** Encoded Data representing the multipart form, or `nil` if any header string fails UTF-8 encoding. When used by `NetworkManager`, `nil` results in `NetworkError.invalidMultipartEncoding`.
 
 ### Part Structure
 
@@ -291,7 +294,7 @@ public init(
 **Default Behavior:**
 - Does not retry on `NetworkError.unauthorized`
 - Does not retry on `URLError.userAuthenticationRequired`
-- Does not retry on custom API errors (types containing "APIError", "ServerError", or "Business")
+- Does not retry on errors conforming to `NonRetriableError` (e.g. business-level or user-presentable errors)
 - Retries on other errors
 
 ---
@@ -355,15 +358,24 @@ class TokenManager: TokenRefreshProvider {
 
 ## Error Types
 
+### NonRetriableError
+
+Protocol for errors that should not be retried by the default `RetryPolicy`. Conform your business-level or user-presentable error types to this protocol instead of relying on type name checks.
+
+```swift
+public protocol NonRetriableError: Error {}
+```
+
 ### NetworkError
 
 Errors that can occur during network operations.
 
 ```swift
 public enum NetworkError: Error {
-    case invalidURL          // URL could not be constructed
-    case emptyResponse       // Response data was empty
-    case unauthorized        // Unauthorized access, typically HTTP 401
+    case invalidURL              // URL could not be constructed (e.g. path contains "..")
+    case invalidMultipartEncoding // Multipart form data failed to encode (e.g. non-UTF-8 header values)
+    case emptyResponse           // Response data was empty
+    case unauthorized            // Unauthorized access, typically HTTP 401
     case invalidResponse     // Response was missing or of an unexpected type
     case conflictingBodyTypes // Both body and multipartData are set
 }

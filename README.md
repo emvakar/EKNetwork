@@ -195,7 +195,7 @@ struct SignInRequest: NetworkRequest {
 
 ```swift
 let manager = NetworkManager(
-    baseURL: URL(string: "https://api.example.com")!
+    baseURL: { URL(string: "https://api.example.com")! }
 )
 
 let response = try await manager.send(
@@ -308,7 +308,7 @@ class UploadViewModel: ObservableObject {
             }
         }
         
-        let manager = NetworkManager(baseURL: baseURL)
+        let manager = NetworkManager(baseURL: { baseURL })
         _ = try await manager.send(UploadRequest(), accessToken: nil)
     }
 }
@@ -353,7 +353,7 @@ class TokenManager: TokenRefreshProvider {
     }
 }
 
-let manager = NetworkManager(baseURL: baseURL)
+let manager = NetworkManager(baseURL: { baseURL })
 manager.tokenRefresher = TokenManager()
 
 // On 401, token will automatically refresh and request will retry
@@ -468,17 +468,19 @@ struct BinaryUploadRequest: NetworkRequest {
 }
 ```
 
-#### Dynamic Base URL Changes
+#### Dynamic Base URL
 
 ```swift
-let manager = NetworkManager(
-    baseURL: URL(string: "https://api.staging.example.com")!
-)
+// Base URL is resolved per request via closure — no race conditions
+var currentBase = URL(string: "https://api.staging.example.com")!
+let manager = NetworkManager(baseURL: { currentBase })
 
-// Switch to production without recreating manager
-manager.updateBaseURL(URL(string: "https://api.example.com")!)
-
+// Switch to production: update the value your closure captures
+currentBase = URL(string: "https://api.example.com")!
 // All subsequent requests will use the new URL
+
+// Or read from config/environment
+let manager = NetworkManager(baseURL: { AppConfig.shared.apiBaseURL })
 ```
 
 #### User-Agent Configuration
@@ -493,7 +495,7 @@ let userAgentConfig = UserAgentConfiguration(
 )
 
 let manager = NetworkManager(
-    baseURL: baseURL,
+    baseURL: { baseURL },
     userAgentConfiguration: userAgentConfig
 )
 // User-Agent will be automatically added to all requests
@@ -563,7 +565,7 @@ class APIClient {
     private init() {
         let baseURL = URL(string: "https://api.example.com")!
         manager = NetworkManager(
-            baseURL: baseURL,
+            baseURL: { baseURL },
             userAgentConfiguration: UserAgentConfiguration(
                 appName: Bundle.main.appName,
                 appVersion: Bundle.main.appVersion,
@@ -654,7 +656,7 @@ func testSignIn() async throws {
     )
     
     let manager = NetworkManager(
-        baseURL: URL(string: "https://test.com")!,
+        baseURL: { URL(string: "https://test.com")! },
         session: mockSession
     )
     
@@ -705,7 +707,7 @@ This will:
 3. Display coverage percentage
 4. Check if coverage meets the 98% requirement
 
-For detailed coverage information, see [README_COVERAGE.md](README_COVERAGE.md).
+Run `./scripts/coverage.sh` for detailed coverage; see script and CI for thresholds.
 
 **Note:** Coverage is automatically checked in CI/CD on every push and pull request.
 
