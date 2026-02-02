@@ -8,8 +8,8 @@
 [![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml/badge.svg)](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml)
-[![Tests](https://img.shields.io/badge/Tests-115%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
-[![Coverage](https://img.shields.io/badge/Coverage-99.42%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-156%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.13%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *A lightweight, type-safe HTTP networking library for Swift applications*
 
@@ -103,7 +103,7 @@ Add EKNetwork to your project dependencies in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.0")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.2")
 ]
 ```
 
@@ -122,7 +122,7 @@ Then add the product to your target:
 
 1. In Xcode, select **File** → **Add Packages...**
 2. Enter the repository URL: `https://github.com/emvakar/EKNetwork.git`
-3. Select **Up to Next Major Version** with `1.4.0`
+3. Select **Up to Next Major Version** with `1.4.2`
 4. Click **Add Package**
 5. Select the `EKNetwork` product and add it to your target
 

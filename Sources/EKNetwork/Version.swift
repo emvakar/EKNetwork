@@ -9,5 +9,5 @@
 //  Version is updated automatically from git tag during build.
 //
 
-internal let EKNetworkVersionString = "1.4.0"
+internal let EKNetworkVersionString = "1.4.2"
 

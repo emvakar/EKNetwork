@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [1.4.2] - 2026-02-03
+
 ### Added
-- **Security & robustness (from IMPROVEMENTS_AND_ANALYSIS)**:
+- **Security & robustness**:
   - **MultipartFormData**: `encodedData()` now returns `Data?` (no force unwrap); UTF-8 encoding failures return `nil`. Name and filename in Content-Disposition are escaped (quotes and backslashes). New error `NetworkError.invalidMultipartEncoding` when encoding fails.
   - **Path normalization**: Request path is normalized (trim slashes, collapse `//`); paths containing `..` are rejected with `NetworkError.invalidURL`.
   - **NonRetriableError**: New protocol; default `RetryPolicy.shouldRetry` returns `false` for errors conforming to `NonRetriableError` (replaces string-based type name checks).
@@ -16,11 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Logging**: Path and error messages in logs use `privacy: .private` to avoid leaking sensitive data.
   - **Convenience init**: `NetworkManager(baseURL: URL, ...)` convenience initializer for fixed base URL.
   - **Shared progress session**: New `ProgressSessionManager` with a single shared `URLSession` and delegate for progress requests; progress requests no longer create a new session per request.
-- **Tests**: 10 new tests in `CoverageImprovementsTests.swift` (convenience init, path validation, multipart escaping, NonRetriableError, Task cancellation, etc.). Total **125 tests**, coverage **99.13%** (ProgressSessionManager excluded from coverage like ProgressDelegate).
+- **Tests**: Extended test suite (`CoverageImprovementsTests`, `ExtendedTestSuite`), progress and conflicting body tests. Total **156 tests**, coverage **99.13%** (ProgressDelegate/ProgressSessionManager excluded from report).
 
 ### Changed
 - **RetryPolicy**: Default `shouldRetry` uses `NonRetriableError` protocol instead of `String(describing: type(of:))`. Custom error types that should not be retried should conform to `NonRetriableError`.
 - **MultipartFormData.encodedData()**: Return type is now `Data?`; callers (e.g. `NetworkManager`) throw `NetworkError.invalidMultipartEncoding` when `nil`.
+- **File headers**: Unified Swift file headers (Created by, Copyright from file metadata).
 
 ## [1.4.1] - 2025-12-XX
 

@@ -5,7 +5,8 @@
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-21%20passed-brightgreen.svg)](Tests)
+[![Tests](https://img.shields.io/badge/Tests-156%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.13%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *Легковесная, типобезопасная библиотека для работы с HTTP в Swift приложениях*
 
@@ -91,7 +92,7 @@ struct GetUserRequest: NetworkRequest {
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.0")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.2")
 ]
 ```
 
