@@ -2,7 +2,7 @@
 //  ProgressDelegate.swift
 //  EKNetwork
 //
-//  Created by Emil Karimov on 10.06.2025.
+//  Created by Emil Karimov on 10.12.2025.
 //  Copyright © 2025 Emil Karimov. All rights reserved.
 //
 

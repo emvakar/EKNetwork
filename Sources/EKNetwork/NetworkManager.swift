@@ -2,7 +2,7 @@
 //  NetworkManager.swift
 //  EKNetwork
 //
-//  Created by Emil Karimov on 10.06.2025.
+//  Created by Emil Karimov on 10.12.2025.
 //  Copyright © 2025 Emil Karimov. All rights reserved.
 //
 
@@ -90,6 +90,15 @@ public struct UserAgentConfiguration {
     }
 }
 
+/// Normalizes request path: trims slashes, collapses "//", and rejects ".." (path traversal).
+/// - Returns: Normalized path (e.g. "/users" or "/"), or nil if path is invalid (e.g. contains "..").
+private func normalizePath(_ path: String) -> String? {
+    var p = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    while p.contains("//") { p = p.replacingOccurrences(of: "//", with: "/") }
+    if p.contains("..") { return nil }
+    return p.isEmpty ? "/" : "/" + p
+}
+
 private func normalizeHeaders(_ headers: [AnyHashable: Any]) -> [String: String] {
     headers.reduce(into: [String: String]()) { result, element in
         guard let key = element.key as? String else { return }
@@ -110,6 +119,16 @@ public enum HTTPMethod: String {
     case delete = "DELETE"
     case patch = "PATCH"
 
+}
+
+/// Escapes double quotes and backslashes in Content-Disposition header values (name, filename).
+private func escapeMultipartHeaderValue(_ value: String) -> String {
+    value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+/// Encodes a string to UTF-8 Data; returns nil if encoding fails (avoids force unwrap).
+private func utf8Data(_ string: String) -> Data? {
+    string.data(using: .utf8)
 }
 
 /// Represents multipart form data for file uploads.
@@ -159,24 +178,32 @@ public struct MultipartFormData {
     }
 
     /// Encodes the multipart form data into a Data object suitable for HTTP body.
-    /// - Returns: Encoded Data representing the multipart form.
-    public func encodedData() -> Data {
+    /// Uses safe UTF-8 encoding and escapes quotes in name/filename per RFC 2183.
+    /// - Returns: Encoded Data representing the multipart form, or nil if any header string fails UTF-8 encoding.
+    public func encodedData() -> Data? {
+        guard let boundaryData = utf8Data("--\(boundary)\r\n"),
+              let closingBoundaryData = utf8Data("--\(boundary)--\r\n"),
+              let crlf = utf8Data("\r\n") else { return nil }
         var result = Data()
-        let boundaryPrefix = "--\(boundary)\r\n"
-        
         for part in parts {
-            result.append(Data(boundaryPrefix.utf8))
+            result.append(boundaryData)
+            let safeName = escapeMultipartHeaderValue(part.name)
             if let filename = part.filename {
-                result.append("Content-Disposition: form-data; name=\"\(part.name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+                let safeFilename = escapeMultipartHeaderValue(filename)
+                guard let line = utf8Data("Content-Disposition: form-data; name=\"\(safeName)\"; filename=\"\(safeFilename)\"\r\n"),
+                      let mimeLine = utf8Data("Content-Type: \(part.mimeType)\r\n\r\n") else { return nil }
+                result.append(line)
+                result.append(mimeLine)
             } else {
-                result.append("Content-Disposition: form-data; name=\"\(part.name)\"\r\n".data(using: .utf8)!)
+                guard let line = utf8Data("Content-Disposition: form-data; name=\"\(safeName)\"\r\n"),
+                      let mimeLine = utf8Data("Content-Type: \(part.mimeType)\r\n\r\n") else { return nil }
+                result.append(line)
+                result.append(mimeLine)
             }
-            result.append("Content-Type: \(part.mimeType)\r\n\r\n".data(using: .utf8)!)
             result.append(part.data)
-            result.append("\r\n".data(using: .utf8)!)
+            result.append(crlf)
         }
-        
-        result.append("--\(boundary)--\r\n".data(using: .utf8)!)
+        result.append(closingBoundaryData)
         return result
     }
 }
@@ -185,6 +212,8 @@ public struct MultipartFormData {
 public enum NetworkError: Error {
     /// URL could not be constructed.
     case invalidURL
+    /// Multipart form data failed to encode (e.g. non-UTF-8 header values).
+    case invalidMultipartEncoding
     /// Response data was empty.
     case emptyResponse
     /// Unauthorized access, typically HTTP 401.
@@ -378,6 +407,10 @@ public struct RequestBody {
 
 }
 
+/// Errors conforming to this protocol are not retried by the default RetryPolicy.
+/// Use this for business-level or user-presentable errors instead of relying on type name checks.
+public protocol NonRetriableError: Error {}
+
 /// Defines the retry behavior for network requests, including maximum retry attempts,
 /// delay between retries, and a closure to determine if a retry should occur based on the error.
 public struct RetryPolicy {
@@ -395,18 +428,11 @@ public struct RetryPolicy {
     ///   - delay: Delay between retries in seconds (default is 1.0).
     ///   - shouldRetry: Closure to decide if retry should occur based on error.
     public init(maxRetryCount: Int = 0, delay: TimeInterval = 1.0, shouldRetry: @escaping (Error) -> Bool = {
-        // Do not retry on known business logic errors or unauthorized access
-        if case NetworkError.unauthorized = $0 {
-        return false
-    }
+        if case NetworkError.unauthorized = $0 { return false }
         if let urlError = $0 as? URLError {
-        return urlError.code != .userAuthenticationRequired
-    }
-        // Do not retry errors that are already user-presentable or business-level
-        let typeName = String(describing: type(of: $0))
-        if typeName.contains("APIError") || typeName.contains("ServerError") || typeName.contains("Business") {
-        return false
-    }
+            return urlError.code != .userAuthenticationRequired
+        }
+        if $0 is NonRetriableError { return false }
         return true
     }) {
         self.maxRetryCount = maxRetryCount
@@ -453,10 +479,11 @@ public protocol URLSessionProtocol {
 extension URLSession: URLSessionProtocol {}
 
 /// Manages network requests, including retries, token refresh, and progress reporting.
-open class NetworkManager: NetworkManaging {
+/// Marked as @unchecked Sendable so it can be used from async contexts (e.g. tests) without isolation errors; callers must not mutate shared state concurrently.
+open class NetworkManager: NetworkManaging, @unchecked Sendable {
 
-    /// The base URL that all request paths will be appended to.
-    /// Can be changed dynamically using `updateBaseURL(_:)` method.
+    /// The base URL provider; each request calls this closure to get the current base URL.
+    /// Pass a closure (e.g. `{ myURL }` or `{ URL(string: "https://api.example.com")! }`) for dynamic or fixed base URL.
     private(set) public var baseURL: () -> URL
     private let session: URLSessionProtocol
     /// Optional token refresher to handle authentication token renewal.
@@ -482,6 +509,16 @@ open class NetworkManager: NetworkManaging {
         self.session = session
         self.userAgentConfiguration = userAgentConfiguration
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
+    }
+
+    /// Convenience initializer for a fixed base URL (wraps URL in a closure).
+    public convenience init(
+        baseURL: URL,
+        session: URLSessionProtocol = URLSession.shared,
+        loggerSubsystem: String = "com.yourapp.networking",
+        userAgentConfiguration: UserAgentConfiguration? = nil
+    ) {
+        self.init(baseURL: { baseURL }, session: session, loggerSubsystem: loggerSubsystem, userAgentConfiguration: userAgentConfiguration)
     }
 
     /// Sends a network request and decodes the response.
@@ -511,11 +548,12 @@ open class NetworkManager: NetworkManaging {
     /// - Returns: Decoded response.
     /// - Throws: Errors if request fails or decoding fails.
     private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
-        // Capture baseURL locally to prevent race conditions if it's updated during request execution
+        try Task.checkCancellation()
         let currentBaseURL = baseURL
-        
-        // Construct URLComponents based on baseURL and request path.
-        guard var urlComponents = URLComponents(url: currentBaseURL().appendingPathComponent(request.path), resolvingAgainstBaseURL: false) else {
+        guard let normalizedPath = normalizePath(request.path) else {
+            throw NetworkError.invalidURL
+        }
+        guard var urlComponents = URLComponents(url: currentBaseURL().appendingPathComponent(normalizedPath), resolvingAgainstBaseURL: false) else {
             throw NetworkError.invalidURL
         }
         // Append query parameters if provided.
@@ -527,7 +565,7 @@ open class NetworkManager: NetworkManaging {
             throw NetworkError.invalidURL
         }
         
-        logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public)")
+        logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .private)")
         
         var urlRequest = URLRequest(url: url)
         
@@ -601,31 +639,21 @@ open class NetworkManager: NetworkManaging {
 
         // Set multipart form data if provided.
         if let multipart = request.multipartData {
-            let multipartData = multipart.encodedData()
+            guard let multipartData = multipart.encodedData() else {
+                throw NetworkError.invalidMultipartEncoding
+            }
             urlRequest.httpBody = multipartData
             urlRequest.setValue("multipart/form-data; boundary=\(multipart.boundary)", forHTTPHeaderField: "Content-Type")
             urlRequest.setValue("\(multipartData.count)", forHTTPHeaderField: "Content-Length")
         }
 
-        // Use a URLSession with delegate for progress if needed.
-        // We use a shared progressSession with a delegate manager to avoid creating new sessions
-        // for each request, which prevents memory leaks.
-        let sessionToUse: URLSessionProtocol
-        if let progress = request.progress {
-            // For progress tracking, we need to use URLSession with delegate.
-            // Since URLSessionProtocol doesn't support delegates, we create a temporary session.
-            // Note: This is a limitation of the protocol abstraction. In production, consider
-            // using a shared progress session with a delegate manager for better memory management.
-            let delegate = ProgressDelegate(progress: progress)
-            let progressSession = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
-            sessionToUse = progressSession
-        } else {
-            sessionToUse = session
-        }
-
         do {
-            // Perform network data task.
-            let (data, response) = try await sessionToUse.data(for: urlRequest)
+            let (data, response): (Data, URLResponse)
+            if let progress = request.progress {
+                (data, response) = try await ProgressSessionManager.execute(request: urlRequest, progress: progress)
+            } else {
+                (data, response) = try await session.data(for: urlRequest)
+            }
 
             // Handle HTTP 401 Unauthorized response.
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
@@ -649,22 +677,21 @@ open class NetworkManager: NetworkManaging {
             }
             try parseError(response, request, data)
             let decoded = try request.decodeResponse(data: data, response: response)
-            logger.info("✅ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .public) SUCCESS")
+            logger.info("✅ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .private) SUCCESS")
             return decoded
 
         } catch {
+            if Task.isCancelled { throw CancellationError() }
             logger.debug("Evaluating retry policy: attempt \(attempt), max \(request.retryPolicy.maxRetryCount)")
             if attempt < request.retryPolicy.maxRetryCount, request.retryPolicy.shouldRetry(error) {
-                logger.debug("Retry policy decided to retry for error: \(String(describing: error), privacy: .public)")
-                logger.warning("Request failed: \(request.path, privacy: .public), attempt: \(attempt), error: \(String(describing: error), privacy: .public)")
-                logger.debug("Retrying request: \(request.path, privacy: .public), next attempt: \(attempt + 1)")
-                // Wait for the specified delay before retrying.
+                logger.debug("Retry policy decided to retry for error: \(String(describing: error), privacy: .private)")
+                logger.warning("Request failed: \(request.path, privacy: .private), attempt: \(attempt), error: \(String(describing: error), privacy: .private)")
+                logger.debug("Retrying request: \(request.path, privacy: .private), next attempt: \(attempt + 1)")
                 try await Task.sleep(nanoseconds: UInt64(request.retryPolicy.delay * 1_000_000_000))
-                // Retry the request with incremented attempt count.
+                if Task.isCancelled { throw CancellationError() }
                 return try await performRequest(request, accessToken: accessToken, shouldRetry: shouldRetry, attempt: attempt + 1)
             }
-            // Log permanent failure and rethrow the error.
-            logger.error("Request failed permanently: \(request.path, privacy: .public), error: \(String(describing: error), privacy: .public)")
+            logger.error("Request failed permanently: \(request.path, privacy: .private), error: \(String(describing: error), privacy: .private)")
             throw error
         }
     }
