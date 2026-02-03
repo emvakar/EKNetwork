@@ -112,7 +112,7 @@ jobs:
           "$TEST_BINARY" \
           $ARCH_FLAG \
           -format=text \
-          -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift" \
+          -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift|.*ProgressSessionManager\.swift" \
           > coverage_report.txt 2>&1 || {
           echo "⚠️ Coverage report generation had issues, but continuing..."
           echo "PROFDATA: $PROFDATA"

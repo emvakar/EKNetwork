@@ -126,7 +126,7 @@ func testMultipartFormDataPartNoFilename() {
 
 @Test("MultipartFormData empty encodedData")
 func testMultipartFormDataEmptyEncoded() async throws {
-    var multipart = MultipartFormData()
+    let multipart = MultipartFormData()
     let data = try #require(multipart.encodedData(), "Empty multipart should encode")
     #expect(!data.isEmpty)
     let str = String(data: data, encoding: .utf8) ?? ""
@@ -135,8 +135,8 @@ func testMultipartFormDataEmptyEncoded() async throws {
 
 @Test("MultipartFormData boundary is unique")
 func testMultipartFormDataBoundaryUnique() {
-    var m1 = MultipartFormData()
-    var m2 = MultipartFormData()
+    let m1 = MultipartFormData()
+    let m2 = MultipartFormData()
     #expect(m1.boundary != m2.boundary)
 }
 
