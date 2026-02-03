@@ -22,6 +22,12 @@ private final class ProgressTaskContext: @unchecked Sendable {
 }
 
 private final class ProgressDelegateManager: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
+    private static let fallbackURL: URL = {
+        if let url = URL(string: "about:blank") {
+            return url
+        }
+        return URL(fileURLWithPath: "/")
+    }()
     private let lock = NSLock()
     private var contexts: [Int: ProgressTaskContext] = [:]
 
@@ -81,7 +87,8 @@ private final class ProgressDelegateManager: NSObject, URLSessionDataDelegate, U
             ctx.continuation.resume(throwing: error)
             return
         }
-        let response = ctx.response ?? URLResponse(url: task.originalRequest?.url ?? URL(string: "about:blank")!, mimeType: nil, expectedContentLength: 0, textEncodingName: nil)
+        let responseURL = task.originalRequest?.url ?? Self.fallbackURL
+        let response = ctx.response ?? URLResponse(url: responseURL, mimeType: nil, expectedContentLength: 0, textEncodingName: nil)
         ctx.continuation.resume(returning: (ctx.data, response))
         Task { @MainActor in
             ctx.progress.fractionCompleted = 1.0
