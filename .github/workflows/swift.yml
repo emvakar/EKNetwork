@@ -7,32 +7,107 @@ on:
     branches: [ main, develop ]
 
 concurrency:
-  group: swift-ci-${{ github.ref }}
+  group: swift-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test and Coverage
-    runs-on: macos-latest
+  pr_tests:
+    name: PR · Tests (matrix)
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ macos-14, macos-15 ]
+        swift: [ "6.1", "6.2" ]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Swift
+      - name: Setup Swift (${{ matrix.swift }})
         uses: swift-actions/setup-swift@v3
         with:
-          swift-version: "latest"
+          swift-version: ${{ matrix.swift }}
 
-      # SwiftPM caches (faster + smaller than caching the whole .build)
       - name: Cache SwiftPM
         uses: actions/cache@v4
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
             ~/.swiftpm
-          key: ${{ runner.os }}-swiftpm-${{ hashFiles('**/Package.resolved') }}
+          key: ${{ runner.os }}-swiftpm-${{ matrix.swift }}-${{ hashFiles('**/Package.resolved') }}
           restore-keys: |
+            ${{ runner.os }}-swiftpm-${{ matrix.swift }}-
+            ${{ runner.os }}-swiftpm-
+
+      - name: Run tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "🧪 Running tests (no coverage)…"
+          swift test --parallel 2>&1 | tee test_output.txt
+
+          # Best-effort test count (XCTest usually prints: "Executed N tests")
+          TEST_COUNT=$(grep -Eo "Executed[[:space:]]+[0-9]+[[:space:]]+tests" test_output.txt | grep -Eo "[0-9]+" | tail -1 || true)
+          TEST_COUNT=${TEST_COUNT:-0}
+          echo "📊 Test count: $TEST_COUNT"
+
+      - name: Create summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## PR Tests"
+            echo "- OS: ${{ matrix.os }}"
+            echo "- Swift: ${{ matrix.swift }}"
+            echo "- Result: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  main_coverage_gate:
+    name: Main · Coverage gate (matrix)
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          # Primary combo: this one enforces the coverage threshold (gate)
+          - os: macos-15
+            swift: "6.2"
+            primary: true
+          # Additional combos: run coverage + artifacts for visibility, but do not gate
+          - os: macos-15
+            swift: "6.1"
+            primary: false
+          - os: macos-14
+            swift: "6.2"
+            primary: false
+          - os: macos-14
+            swift: "6.1"
+            primary: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift (${{ matrix.swift }})
+        uses: swift-actions/setup-swift@v3
+        with:
+          swift-version: ${{ matrix.swift }}
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ matrix.swift }}-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-${{ matrix.swift }}-
             ${{ runner.os }}-swiftpm-
 
       - name: Run tests with coverage
@@ -41,10 +116,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "🧪 Running tests…"
+          echo "🧪 Running tests with coverage…"
           swift test --enable-code-coverage --parallel 2>&1 | tee test_output.txt
 
-          # XCTest usually prints: "Executed N tests" (most reliable)
           TEST_COUNT=$(grep -Eo "Executed[[:space:]]+[0-9]+[[:space:]]+tests" test_output.txt | grep -Eo "[0-9]+" | tail -1 || true)
           TEST_COUNT=${TEST_COUNT:-0}
 
@@ -57,7 +131,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # SwiftPM typically writes a default.profdata, but keep a fallback.
           PROFDATA=$(find .build -name "default.profdata" -print -quit 2>/dev/null || true)
           if [ -z "${PROFDATA}" ]; then
             PROFDATA=$(find .build -name "*.profdata" -print -quit 2>/dev/null || true)
@@ -78,10 +151,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Prefer xctest bundles produced by SwiftPM (works across package names)
           TEST_BINARY=$(find .build -path "*.xctest/Contents/MacOS/*" -type f -perm +111 -print -quit 2>/dev/null || true)
 
-          # Fallback: any executable ending with Tests inside .build
           if [ -z "${TEST_BINARY}" ]; then
             TEST_BINARY=$(find .build -type f -perm +111 -name "*Tests" 2>/dev/null | grep -v "\.dSYM" | head -1 || true)
           fi
@@ -105,7 +176,6 @@ jobs:
           PROFDATA="${{ steps.coverage.outputs.profdata }}"
           TEST_BINARY="${{ steps.binary.outputs.binary }}"
 
-          # Detect architecture (llvm-cov requires correct arch on macOS)
           ARCH=$(uname -m)
           if [ "$ARCH" = "arm64" ]; then
             ARCH_FLAG="-arch arm64"
@@ -115,7 +185,6 @@ jobs:
 
           IGNORE_REGEX='.*Tests.*|.*Version\\.swift|.*EKNetworkVersion\\.swift|.*ProgressDelegate\\.swift|.*ProgressSessionManager\\.swift'
 
-          echo "📈 Exporting coverage JSON…"
           xcrun llvm-cov export \
             $ARCH_FLAG \
             -instr-profile "$PROFDATA" \
@@ -124,7 +193,6 @@ jobs:
             "$TEST_BINARY" \
             > coverage.json
 
-          echo "📄 Generating human-readable report…"
           xcrun llvm-cov show \
             $ARCH_FLAG \
             -instr-profile "$PROFDATA" \
@@ -132,8 +200,6 @@ jobs:
             -format=text \
             "$TEST_BINARY" \
             > coverage_report.txt
-
-          echo "✅ Coverage artifacts generated (coverage.json, coverage_report.txt)"
 
       - name: Calculate coverage
         id: calc
@@ -145,28 +211,6 @@ jobs:
             echo "❌ coverage.json not found or empty"
             exit 1
           fi
-
-          # Parse llvm-cov JSON via python (available on macOS runners)
-          python3 - <<'PY'
-          import json
-
-          with open('coverage.json', 'r', encoding='utf-8') as f:
-              data = json.load(f)
-
-          # llvm-cov export JSON structure: data["data"][...]["totals"]["lines"]
-          totals = data.get('data', [{}])[0].get('totals', {})
-          lines = totals.get('lines', {})
-          covered = int(lines.get('covered', 0))
-          count = int(lines.get('count', 0))
-
-          if count == 0:
-              raise SystemExit('No line coverage data found (count == 0)')
-
-          coverage = (covered * 100.0) / count
-          print(f"COVERED={covered}")
-          print(f"TOTAL={count}")
-          print(f"COVERAGE={coverage:.2f}")
-          PY
 
           COVERED=$(python3 -c "import json; d=json.load(open('coverage.json')); l=d['data'][0]['totals']['lines']; print(int(l.get('covered',0)))")
           TOTAL=$(python3 -c "import json; d=json.load(open('coverage.json')); l=d['data'][0]['totals']['lines']; print(int(l.get('count',0)))")
@@ -181,12 +225,16 @@ jobs:
           echo ""
           echo "✅ Code Coverage Report"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "Total lines:     $TOTAL"
-          echo "Covered lines:   $COVERED"
-          echo "Coverage:        ${COVERAGE}%"
+          echo "OS:             ${{ matrix.os }}"
+          echo "Swift:          ${{ matrix.swift }}"
+          echo "Total lines:    $TOTAL"
+          echo "Covered lines:  $COVERED"
+          echo "Coverage:       ${COVERAGE}%"
+          echo "Primary (gate): ${{ matrix.primary }}"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-      - name: Check coverage threshold
+      - name: Check coverage threshold (primary only)
+        if: ${{ matrix.primary }}
         shell: bash
         run: |
           set -euo pipefail
@@ -205,24 +253,22 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: coverage
+          name: coverage-${{ matrix.os }}-swift-${{ matrix.swift }}
           path: |
             coverage_report.txt
             coverage.json
           retention-days: 30
 
-      - name: Create test summary
+      - name: Create summary
         if: always()
         shell: bash
         run: |
           {
-            echo "## Test Results"
-            echo ""
-            echo "✅ **Tests:** ${{ steps.tests.outputs.test_count }}"
-            echo "📊 **Coverage:** ${{ steps.calc.outputs.coverage }}% (${{ steps.calc.outputs.covered }}/${{ steps.calc.outputs.total }} lines)"
-            echo ""
-            echo "### Coverage Details"
-            echo "- Total lines: ${{ steps.calc.outputs.total }}"
-            echo "- Covered lines: ${{ steps.calc.outputs.covered }}"
-            echo "- Coverage: ${{ steps.calc.outputs.coverage }}%"
+            echo "## Main Coverage"
+            echo "- OS: ${{ matrix.os }}"
+            echo "- Swift: ${{ matrix.swift }}"
+            echo "- Primary (gate): ${{ matrix.primary }}"
+            echo "- Tests: ${{ steps.tests.outputs.test_count }}"
+            echo "- Coverage: ${{ steps.calc.outputs.coverage }}% (${{ steps.calc.outputs.covered }}/${{ steps.calc.outputs.total }} lines)"
+            echo "- Result: ${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
