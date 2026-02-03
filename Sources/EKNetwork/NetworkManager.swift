@@ -530,7 +530,47 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     public func send<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?) async throws -> T.Response {
         return try await performRequest(request, accessToken: accessToken, shouldRetry: true, attempt: 0)
     }
-    
+
+    /// Builds the request URL by normalizing the path, appending it to the base URL, and adding query parameters.
+    private func buildRequestURL<T: NetworkRequest>(_ request: T) throws -> URL {
+        guard let normalizedPath = normalizePath(request.path) else {
+            throw NetworkError.invalidURL
+        }
+        guard var urlComponents = URLComponents(url: baseURL().appendingPathComponent(normalizedPath), resolvingAgainstBaseURL: false) else {
+            throw NetworkError.invalidURL
+        }
+        if let query = request.queryParameters {
+            urlComponents.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
+        }
+        guard let url = urlComponents.url else {
+            throw NetworkError.invalidURL
+        }
+        return url
+    }
+
+    /// Applies default headers, authentication, Accept, and User-Agent to the request.
+    private func applyCommonHeaders<T: NetworkRequest>(to urlRequest: inout URLRequest, request: T, accessToken: (() -> String?)?) {
+        if let headers = request.headers {
+            for (key, value) in headers {
+                urlRequest.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+
+        if let accessToken = accessToken?(),
+           urlRequest.value(forHTTPHeaderField: "Authorization") == nil {
+            urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+
+        if request.contentType.contains("application/json"),
+           urlRequest.value(forHTTPHeaderField: "Accept") == nil {
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
+
+        if let userAgentConfig = userAgentConfiguration,
+           urlRequest.value(forHTTPHeaderField: "User-Agent") == nil {
+            urlRequest.setValue(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
+        }
+    }
 
     fileprivate func parseError(_ response: URLResponse, _ request: any NetworkRequest, _ data: Data) throws {
         // Decode the response data into the expected Response type.
@@ -551,51 +591,14 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     /// - Throws: Errors if request fails or decoding fails.
     private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
         try Task.checkCancellation()
-        let currentBaseURL = baseURL
-        guard let normalizedPath = normalizePath(request.path) else {
-            throw NetworkError.invalidURL
-        }
-        guard var urlComponents = URLComponents(url: currentBaseURL().appendingPathComponent(normalizedPath), resolvingAgainstBaseURL: false) else {
-            throw NetworkError.invalidURL
-        }
-        // Append query parameters if provided.
-        if let query = request.queryParameters {
-            urlComponents.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
-        }
-
-        guard let url = urlComponents.url else {
-            throw NetworkError.invalidURL
-        }
+        let url = try buildRequestURL(request)
         
         logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .private)")
         
         var urlRequest = URLRequest(url: url)
         
         urlRequest.httpMethod = request.method.rawValue.uppercased()
-
-        // Set headers if provided.
-        if let headers = request.headers {
-            for (key, value) in headers {
-                urlRequest.setValue(value, forHTTPHeaderField: key)
-            }
-        }
-
-        if let accessToken = accessToken?(),
-           urlRequest.value(forHTTPHeaderField: "Authorization") == nil {
-            urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        }
-
-        // Set Accept header to application/json if Content-Type is application/json and Accept is not already set
-        if request.contentType.contains("application/json"),
-           urlRequest.value(forHTTPHeaderField: "Accept") == nil {
-            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
-        }
-
-        // Set User-Agent header if configured and not already set
-        if let userAgentConfig = userAgentConfiguration,
-           urlRequest.value(forHTTPHeaderField: "User-Agent") == nil {
-            urlRequest.setValue(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
-        }
+        applyCommonHeaders(to: &urlRequest, request: request, accessToken: accessToken)
 
         // Validate that body and multipartData are not both set
         if request.body != nil && request.multipartData != nil {
