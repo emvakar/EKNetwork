@@ -6,188 +6,223 @@ on:
   pull_request:
     branches: [ main, develop ]
 
+concurrency:
+  group: swift-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Test and Coverage
     runs-on: macos-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-    
-    - name: Setup Swift
-      uses: swift-actions/setup-swift@v3
-      with:
-        swift-version: "6.2"
-    
-    - name: Cache Swift packages
-      uses: actions/cache@v4
-      with:
-        path: .build
-        key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
-        restore-keys: |
-          ${{ runner.os }}-spm-
-    
-    - name: Build
-      run: swift build
-    
-    - name: Run tests with coverage
-      id: tests
-      run: |
-        swift test --enable-code-coverage 2>&1 | tee test_output.txt
-        # Extract test count from output
-        TEST_COUNT=$(grep -oE "Test run with [0-9]+ tests" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
-        if [ -z "$TEST_COUNT" ] || [ "$TEST_COUNT" = "0" ]; then
-          # Try alternative pattern
-          TEST_COUNT=$(grep -oE "[0-9]+ tests? passed" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
-        fi
-        if [ -z "$TEST_COUNT" ] || [ "$TEST_COUNT" = "0" ]; then
-          # Try one more pattern
-          TEST_COUNT=$(grep -oE "passed.*[0-9]+ tests?" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
-        fi
-        echo "test_count=$TEST_COUNT" >> $GITHUB_OUTPUT
-        echo "📊 Test count: $TEST_COUNT"
-        if [ "$TEST_COUNT" = "0" ]; then
-          echo "⚠️ Could not extract test count, showing last 20 lines of output:"
-          tail -20 test_output.txt || true
-        fi
-    
-    - name: Find coverage data
-      id: coverage
-      run: |
-        PROFDATA=$(find .build -name "*.profdata" | head -1)
-        if [ -z "$PROFDATA" ]; then
-          echo "❌ No coverage data found"
-          find .build -type f -name "*.profdata" || echo "No profdata files"
-          exit 1
-        fi
-        echo "profdata=$PROFDATA" >> $GITHUB_OUTPUT
-        echo "📊 Coverage data: $PROFDATA"
-    
-    - name: Find test binary
-      id: binary
-      run: |
-        # Try multiple paths for test binary
-        TEST_BINARY=""
-        
-        # Method 1: xctest bundle
-        TEST_BINARY=$(find .build -path "*/EKNetworkPackageTests.xctest/Contents/MacOS/EKNetworkPackageTests" 2>/dev/null | head -1)
-        
-        # Method 2: Direct binary
-        if [ -z "$TEST_BINARY" ]; then
-          TEST_BINARY=$(find .build -name "*PackageTests" -type f -perm +111 2>/dev/null | grep -v ".dSYM" | head -1)
-        fi
-        
-        # Method 3: Any test binary
-        if [ -z "$TEST_BINARY" ]; then
-          TEST_BINARY=$(find .build -name "*Tests" -type f -perm +111 2>/dev/null | grep -v ".dSYM" | head -1)
-        fi
-        
-        if [ -z "$TEST_BINARY" ]; then
-          echo "❌ Test binary not found"
-          echo "Searching in .build:"
-          find .build -type f -perm +111 2>/dev/null | head -10 || true
-          exit 1
-        fi
-        
-        echo "binary=$TEST_BINARY" >> $GITHUB_OUTPUT
-        echo "🧪 Test binary: $TEST_BINARY"
-    
-    - name: Generate coverage report
-      run: |
-        PROFDATA="${{ steps.coverage.outputs.profdata }}"
-        TEST_BINARY="${{ steps.binary.outputs.binary }}"
-        
-        # Detect architecture
-        ARCH=$(uname -m)
-        if [ "$ARCH" = "arm64" ]; then
-          ARCH_FLAG="-arch arm64"
-        else
-          ARCH_FLAG="-arch x86_64"
-        fi
-        
-        echo "📈 Generating coverage report..."
-        xcrun llvm-cov show \
-          -instr-profile "$PROFDATA" \
-          "$TEST_BINARY" \
-          $ARCH_FLAG \
-          -format=text \
-          -ignore-filename-regex=".*Tests.*|.*Version\.swift|.*EKNetworkVersion\.swift|.*ProgressDelegate\.swift|.*ProgressSessionManager\.swift" \
-          > coverage_report.txt 2>&1 || {
-          echo "⚠️ Coverage report generation had issues, but continuing..."
-          echo "PROFDATA: $PROFDATA"
-          echo "TEST_BINARY: $TEST_BINARY"
-          echo "ARCH: $ARCH"
-          ls -la "$PROFDATA" || true
-          ls -la "$TEST_BINARY" || true
-        }
-    
-    - name: Calculate coverage
-      id: calc
-      run: |
-        if [ ! -f coverage_report.txt ]; then
-          echo "❌ Coverage report not found"
-          exit 1
-        fi
-        
-        # llvm-cov format: "    line_number|execution_count|code"
-        # Count lines with execution data (lines that have |)
-        TOTAL_LINES=$(grep -E "^[[:space:]]*[0-9]+\|[[:space:]]*[0-9]+\|" coverage_report.txt 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-        # Count covered lines (execution count > 0)
-        COVERED_LINES=$(grep -E "^[[:space:]]*[0-9]+\|[[:space:]]*[1-9][0-9]*\|" coverage_report.txt 2>/dev/null | wc -l | tr -d ' ' || echo "0")
-        
-        if [ "$TOTAL_LINES" -eq 0 ]; then
-          echo "⚠️ No lines found in coverage report"
-          echo "First 20 lines of report:"
-          head -20 coverage_report.txt || true
-          exit 1
-        fi
-        
-        # Calculate percentage
-        COVERAGE=$(awk "BEGIN {printf \"%.2f\", ($COVERED_LINES * 100) / $TOTAL_LINES}")
-        COVERAGE_INT=$(echo "$COVERAGE" | cut -d. -f1)
-        
-        echo "total=$TOTAL_LINES" >> $GITHUB_OUTPUT
-        echo "covered=$COVERED_LINES" >> $GITHUB_OUTPUT
-        echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
-        echo "coverage_int=$COVERAGE_INT" >> $GITHUB_OUTPUT
-        
-        echo ""
-        echo "✅ Code Coverage Report"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "Total lines:     $TOTAL_LINES"
-        echo "Covered lines:   $COVERED_LINES"
-        echo "Coverage:        ${COVERAGE}%"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    
-    - name: Check coverage threshold
-      run: |
-        COVERAGE_INT="${{ steps.calc.outputs.coverage_int }}"
-        COVERAGE="${{ steps.calc.outputs.coverage }}"
-        
-        if [ "$COVERAGE_INT" -lt 98 ]; then
-          echo "❌ Code coverage is ${COVERAGE}%, but required minimum is 98%"
-          exit 1
-        else
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v3
+        with:
+          swift-version: "latest"
+
+      # SwiftPM caches (faster + smaller than caching the whole .build)
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.swiftpm
+          key: ${{ runner.os }}-swiftpm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-swiftpm-
+
+      - name: Run tests with coverage
+        id: tests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "🧪 Running tests…"
+          swift test --enable-code-coverage --parallel 2>&1 | tee test_output.txt
+
+          # XCTest usually prints: "Executed N tests" (most reliable)
+          TEST_COUNT=$(grep -Eo "Executed[[:space:]]+[0-9]+[[:space:]]+tests" test_output.txt | grep -Eo "[0-9]+" | tail -1 || true)
+          TEST_COUNT=${TEST_COUNT:-0}
+
+          echo "test_count=$TEST_COUNT" >> "$GITHUB_OUTPUT"
+          echo "📊 Test count: $TEST_COUNT"
+
+      - name: Locate coverage profdata
+        id: coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # SwiftPM typically writes a default.profdata, but keep a fallback.
+          PROFDATA=$(find .build -name "default.profdata" -print -quit 2>/dev/null || true)
+          if [ -z "${PROFDATA}" ]; then
+            PROFDATA=$(find .build -name "*.profdata" -print -quit 2>/dev/null || true)
+          fi
+
+          if [ -z "${PROFDATA}" ]; then
+            echo "❌ No coverage profdata found in .build"
+            find .build -type f -name "*.profdata" -maxdepth 6 2>/dev/null || true
+            exit 1
+          fi
+
+          echo "profdata=$PROFDATA" >> "$GITHUB_OUTPUT"
+          echo "📊 profdata: $PROFDATA"
+
+      - name: Locate test binary
+        id: binary
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Prefer xctest bundles produced by SwiftPM (works across package names)
+          TEST_BINARY=$(find .build -path "*.xctest/Contents/MacOS/*" -type f -perm +111 -print -quit 2>/dev/null || true)
+
+          # Fallback: any executable ending with Tests inside .build
+          if [ -z "${TEST_BINARY}" ]; then
+            TEST_BINARY=$(find .build -type f -perm +111 -name "*Tests" 2>/dev/null | grep -v "\.dSYM" | head -1 || true)
+          fi
+
+          if [ -z "${TEST_BINARY}" ]; then
+            echo "❌ Test binary not found"
+            echo "Top executables in .build:" 
+            find .build -type f -perm +111 2>/dev/null | head -20 || true
+            exit 1
+          fi
+
+          echo "binary=$TEST_BINARY" >> "$GITHUB_OUTPUT"
+          echo "🧪 Test binary: $TEST_BINARY"
+
+      - name: Generate coverage report
+        id: cov
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PROFDATA="${{ steps.coverage.outputs.profdata }}"
+          TEST_BINARY="${{ steps.binary.outputs.binary }}"
+
+          # Detect architecture (llvm-cov requires correct arch on macOS)
+          ARCH=$(uname -m)
+          if [ "$ARCH" = "arm64" ]; then
+            ARCH_FLAG="-arch arm64"
+          else
+            ARCH_FLAG="-arch x86_64"
+          fi
+
+          IGNORE_REGEX='.*Tests.*|.*Version\\.swift|.*EKNetworkVersion\\.swift|.*ProgressDelegate\\.swift|.*ProgressSessionManager\\.swift'
+
+          echo "📈 Exporting coverage JSON…"
+          xcrun llvm-cov export \
+            $ARCH_FLAG \
+            -instr-profile "$PROFDATA" \
+            -ignore-filename-regex="$IGNORE_REGEX" \
+            -format="json" \
+            "$TEST_BINARY" \
+            > coverage.json
+
+          echo "📄 Generating human-readable report…"
+          xcrun llvm-cov show \
+            $ARCH_FLAG \
+            -instr-profile "$PROFDATA" \
+            -ignore-filename-regex="$IGNORE_REGEX" \
+            -format=text \
+            "$TEST_BINARY" \
+            > coverage_report.txt
+
+          echo "✅ Coverage artifacts generated (coverage.json, coverage_report.txt)"
+
+      - name: Calculate coverage
+        id: calc
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -s coverage.json ]; then
+            echo "❌ coverage.json not found or empty"
+            exit 1
+          fi
+
+          # Parse llvm-cov JSON via python (available on macOS runners)
+          python3 - <<'PY'
+          import json
+
+          with open('coverage.json', 'r', encoding='utf-8') as f:
+              data = json.load(f)
+
+          # llvm-cov export JSON structure: data["data"][...]["totals"]["lines"]
+          totals = data.get('data', [{}])[0].get('totals', {})
+          lines = totals.get('lines', {})
+          covered = int(lines.get('covered', 0))
+          count = int(lines.get('count', 0))
+
+          if count == 0:
+              raise SystemExit('No line coverage data found (count == 0)')
+
+          coverage = (covered * 100.0) / count
+          print(f"COVERED={covered}")
+          print(f"TOTAL={count}")
+          print(f"COVERAGE={coverage:.2f}")
+          PY
+
+          COVERED=$(python3 -c "import json; d=json.load(open('coverage.json')); l=d['data'][0]['totals']['lines']; print(int(l.get('covered',0)))")
+          TOTAL=$(python3 -c "import json; d=json.load(open('coverage.json')); l=d['data'][0]['totals']['lines']; print(int(l.get('count',0)))")
+          COVERAGE=$(python3 -c "import json; d=json.load(open('coverage.json')); l=d['data'][0]['totals']['lines']; c=int(l.get('covered',0)); t=int(l.get('count',0)); print(f'{(c*100.0/t):.2f}' if t else '0.00')")
+          COVERAGE_INT=${COVERAGE%.*}
+
+          echo "covered=$COVERED" >> "$GITHUB_OUTPUT"
+          echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+          echo "coverage=$COVERAGE" >> "$GITHUB_OUTPUT"
+          echo "coverage_int=$COVERAGE_INT" >> "$GITHUB_OUTPUT"
+
+          echo ""
+          echo "✅ Code Coverage Report"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Total lines:     $TOTAL"
+          echo "Covered lines:   $COVERED"
+          echo "Coverage:        ${COVERAGE}%"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      - name: Check coverage threshold
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          COVERAGE_INT="${{ steps.calc.outputs.coverage_int }}"
+          COVERAGE="${{ steps.calc.outputs.coverage }}"
+
+          if [ "$COVERAGE_INT" -lt 98 ]; then
+            echo "❌ Code coverage is ${COVERAGE}%, but required minimum is 98%"
+            exit 1
+          fi
+
           echo "✅ Code coverage is ${COVERAGE}% (meets 98% requirement)"
-        fi
-    
-    - name: Upload coverage report
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: coverage-report
-        path: coverage_report.txt
-        retention-days: 30
-    
-    - name: Create test summary
-      run: |
-        echo "## Test Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ **Tests:** ${{ steps.tests.outputs.test_count }} passed" >> $GITHUB_STEP_SUMMARY
-        echo "📊 **Coverage:** ${{ steps.calc.outputs.coverage }}% (${{ steps.calc.outputs.covered }}/${{ steps.calc.outputs.total }} lines)" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "### Coverage Details" >> $GITHUB_STEP_SUMMARY
-        echo "- Total lines: ${{ steps.calc.outputs.total }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Covered lines: ${{ steps.calc.outputs.covered }}" >> $GITHUB_STEP_SUMMARY
-        echo "- Coverage: ${{ steps.calc.outputs.coverage }}%" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: |
+            coverage_report.txt
+            coverage.json
+          retention-days: 30
+
+      - name: Create test summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Test Results"
+            echo ""
+            echo "✅ **Tests:** ${{ steps.tests.outputs.test_count }}"
+            echo "📊 **Coverage:** ${{ steps.calc.outputs.coverage }}% (${{ steps.calc.outputs.covered }}/${{ steps.calc.outputs.total }} lines)"
+            echo ""
+            echo "### Coverage Details"
+            echo "- Total lines: ${{ steps.calc.outputs.total }}"
+            echo "- Covered lines: ${{ steps.calc.outputs.covered }}"
+            echo "- Coverage: ${{ steps.calc.outputs.coverage }}%"
+          } >> "$GITHUB_STEP_SUMMARY"
