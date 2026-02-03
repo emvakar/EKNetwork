@@ -133,7 +133,44 @@ Should the request allow retries and token refresh on 401 Unauthorized? Defaults
 #### `var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }`
 Optional handler used when the server returns an empty body. Defaults to `nil`.
 
-When the endpoint returns a successful status with zero-length payload, `NetworkRequest` invokes this handler instead of trying to decode JSON. If you leave it `nil`, `decodeResponse` throws `NetworkError.emptyResponse`. Convenience defaults are already provided for `Response == EmptyResponse` and `Response == StatusCodeResponse`, so override this handler only when you need to synthesize a custom response from headers, status code, or other metadata that accompanies the empty payload.
+When the endpoint returns a successful status with zero-length payload, `NetworkRequest` invokes this handler instead of trying to decode JSON. If you leave it `nil`, `decodeResponse` throws `NetworkError.emptyResponse`.
+
+**Choosing the right approach for empty responses:**
+
+1. **Use `EmptyResponse`** (recommended for simple success cases):
+   ```swift
+   struct DeleteRequest: NetworkRequest {
+       typealias Response = EmptyResponse
+       // emptyResponseHandler is automatically provided
+   }
+   ```
+   Best for endpoints that return 204 No Content or empty bodies where you only need to confirm success. The default implementation ignores any payload and returns `EmptyResponse()`.
+
+2. **Use `StatusCodeResponse`** (when you need HTTP metadata):
+   ```swift
+   struct UpdateRequest: NetworkRequest {
+       typealias Response = StatusCodeResponse
+       // emptyResponseHandler automatically extracts status code and headers
+   }
+   ```
+   Best when you need to inspect the HTTP status code or headers from the response. The default implementation copies status code and headers from `HTTPURLResponse`.
+
+3. **Provide custom `emptyResponseHandler`** (for advanced cases):
+   ```swift
+   struct CustomRequest: NetworkRequest {
+       typealias Response = MyCustomResponse
+       
+       var emptyResponseHandler: ((HTTPURLResponse) throws -> MyCustomResponse)? {
+           { response in
+               MyCustomResponse(
+                   status: response.statusCode,
+                   customHeader: response.value(forHTTPHeaderField: "X-Custom")
+               )
+           }
+       }
+   }
+   ```
+   Only needed when you must synthesize a custom response type from headers, status code, or other metadata that accompanies the empty payload.
 
 #### `var jsonDecoder: JSONDecoder { get }`
 Provides a decoder instance for JSON responses. Defaults to `JSONDecoder()`.

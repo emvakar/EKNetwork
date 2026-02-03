@@ -61,23 +61,8 @@ EOF
 # High Priority Issues
 echo -e "\n${YELLOW}Creating High Priority Issues...${NC}"
 
-ISSUE1_BODY="## Problem
-In lines 729-731, a new \`URLSession\` with \`ProgressDelegate\` is created for each request with progress. \`ProgressDelegate\` holds \`NetworkProgress\`, which may hold \`URLSession\`, creating a potential retain cycle.
-
-## Location
-\`NetworkManager.swift:729-731\`
-
-## Solution
-- Use a shared \`URLSession\` with a delegate manager
-- Or explicitly invalidate session after request completion
-
-## Priority
-High - Memory leak can cause serious issues in production
-
-## Related
-See ROADMAP.md for full details"
-
-create_issue "[BUG] Memory Leak in ProgressDelegate" "$ISSUE1_BODY" '"bug", "high-priority"'
+# Issue #1 (Memory Leak in ProgressDelegate) — RESOLVED in v1.4.2: ProgressSessionManager with shared URLSession implemented.
+# create_issue "[BUG] Memory Leak in ProgressDelegate" "$ISSUE1_BODY" '"bug", "high-priority"'
 
 ISSUE2_BODY="## Problem
 Force unwrap (\`!\`) is used in lines 273, 275, 277, 279, 282 when converting strings to Data. This can cause crashes if conversion fails.
@@ -142,21 +127,8 @@ create_issue "[IMPROVEMENT] Missing Task Cancellation Handling in Retry Logic" "
 # Improvements
 echo -e "\n${YELLOW}Creating Improvement Issues...${NC}"
 
-IMPROVEMENT1_BODY="## Description
-Use a shared \`URLSession\` with delegate manager for all progress requests.
-
-## Benefits
-- Avoid memory leaks
-- Better performance
-- Centralized management
-
-## Priority
-High
-
-## Related
-See ROADMAP.md for full details"
-
-create_issue "[IMPROVEMENT] Shared URLSession for Progress Tracking" "$IMPROVEMENT1_BODY" '"enhancement", "high-priority"'
+# Improvement #1 (Shared URLSession for Progress Tracking) — COMPLETED in v1.4.2: ProgressSessionManager implemented.
+# create_issue "[IMPROVEMENT] Shared URLSession for Progress Tracking" "$IMPROVEMENT1_BODY" '"enhancement", "high-priority"'
 
 IMPROVEMENT2_BODY="## Description
 Add support for cancelling requests via \`Task\` cancellation.

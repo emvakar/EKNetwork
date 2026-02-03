@@ -36,6 +36,17 @@ When using EKNetwork, please follow these security best practices:
 6. **Use certificate pinning** for critical API endpoints when appropriate
 7. **Implement rate limiting** to prevent abuse
 8. **Log security events** for monitoring and auditing
+9. **Never include secrets in URLs**: Do not place authentication tokens, API keys, or other sensitive data in:
+   - Request paths (e.g., `/api/users/{token}`)
+   - Query parameters (e.g., `?api_key=secret`)
+   - Base URLs (e.g., `https://api.example.com?key=secret`)
+   
+   Instead, use:
+   - HTTP headers (e.g., `Authorization: Bearer <token>`)
+   - Request bodies for POST/PUT requests
+   - Secure token storage mechanisms
+   
+   **Note:** EKNetwork logs paths and errors with `privacy: .private` to prevent sensitive data from appearing in logs, but you should still avoid placing secrets in URLs as they may be exposed in network traces, browser history, or server logs.
 
 ## Disclosure Policy
 

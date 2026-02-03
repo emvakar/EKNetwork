@@ -183,7 +183,7 @@ jobs:
             ARCH_FLAG="-arch x86_64"
           fi
 
-          IGNORE_REGEX='.*Tests.*|.*Version\\.swift|.*EKNetworkVersion\\.swift|.*ProgressDelegate\\.swift|.*ProgressSessionManager\\.swift'
+          IGNORE_REGEX='.*Tests.*|.*Version\\.swift|.*EKNetworkVersion\\.swift|.*ProgressSessionManager\\.swift'
 
           xcrun llvm-cov export \
             $ARCH_FLAG \

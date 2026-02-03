@@ -4,17 +4,9 @@ This document outlines the planned improvements and known issues for EKNetwork.
 
 ## 🎯 High Priority Issues
 
-### Issue #1: Memory Leak in ProgressDelegate
-**Status:** 🔴 Critical  
-**Location:** `NetworkManager.swift:729-731`
-
-**Problem:** Creating a new `URLSession` with `ProgressDelegate` for each progress request can cause memory leaks.
-
-**Solution:**
-- Use a shared `URLSession` with a delegate manager
-- Or explicitly invalidate session after request completion
-
-**Related Issue:** See GitHub issue for details
+### Issue #1: ~~Memory Leak in ProgressDelegate~~ ✅ Resolved (v1.4.2)
+**Status:** ✅ Resolved  
+**Resolved in:** v1.4.2 — Implemented `ProgressSessionManager` with a shared `URLSession` and `ProgressDelegateManager` to avoid creating a new session per request. This eliminates memory leaks and improves performance. The old `ProgressDelegate` class has been removed.
 
 ---
 
@@ -104,17 +96,9 @@ This document outlines the planned improvements and known issues for EKNetwork.
 
 ---
 
-### Issue #9: ProgressDelegate Task Cancellation
-**Status:** 🟢 Low  
-**Location:** `NetworkManager.swift:807-809, 822-824, 830-832`
-
-**Problem:** `Task { @MainActor in }` in `ProgressDelegate` may continue after request cancellation.
-
-**Solution:**
-- Check `Task.isCancelled` before updating
-- Use `Task.checkCancellation()`
-
-**Related Issue:** See GitHub issue for details
+### Issue #9: ~~ProgressDelegate Task Cancellation~~ ✅ N/A (v1.4.2)
+**Status:** ✅ N/A  
+**Resolved in:** v1.4.2 — `ProgressDelegate` was replaced with `ProgressSessionManager` and `ProgressDelegateManager`. Task cancellation is now handled properly through the shared session architecture.
 
 ---
 
@@ -134,18 +118,18 @@ This document outlines the planned improvements and known issues for EKNetwork.
 
 ## 💡 Planned Improvements
 
-### Improvement #1: Shared URLSession for Progress Tracking
+### Improvement #1: ~~Shared URLSession for Progress Tracking~~ ✅ Completed (v1.4.2)
 **Priority:** High  
-**Status:** 📋 Planned
+**Status:** ✅ Completed
 
-Use a shared `URLSession` with delegate manager for all progress requests.
+Implemented `ProgressSessionManager` with a shared `URLSession` and `ProgressDelegateManager` for all progress requests.
 
 **Benefits:**
-- Avoid memory leaks
-- Better performance
-- Centralized management
+- Avoid memory leaks ✅
+- Better performance ✅
+- Centralized management ✅
 
-**Related Issue:** See GitHub issue for details
+**Related Issue:** See CHANGELOG.md for details
 
 ---
 
@@ -274,5 +258,5 @@ Cache frequently used URLRequest components.
 
 ---
 
-*Last updated: 2025-12-10*
+*Last updated: 2026-02-03*
 

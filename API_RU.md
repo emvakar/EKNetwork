@@ -130,7 +130,44 @@ HTTP метод для запроса.
 #### `var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }`
 Опциональный обработчик, используемый, когда сервер возвращает пустое тело. По умолчанию `nil`.
 
-Когда сервер отвечает успешным кодом и нулевой длиной тела, `NetworkRequest` вызывает этот обработчик вместо JSON-декодирования. Если оставить `nil`, `decodeResponse` выбросит `NetworkError.emptyResponse`. Для `Response == EmptyResponse` и `Response == StatusCodeResponse` уже есть стандартные реализации, которые возвращают эти типы, поэтому переопределяйте `emptyResponseHandler` только когда нужно сформировать кастомный результат на основе заголовков или кодов состояния, сопровождающих пустой payload.
+Когда сервер отвечает успешным кодом и нулевой длиной тела, `NetworkRequest` вызывает этот обработчик вместо JSON-декодирования. Если оставить `nil`, `decodeResponse` выбросит `NetworkError.emptyResponse`.
+
+**Выбор подходящего подхода для пустых ответов:**
+
+1. **Используйте `EmptyResponse`** (рекомендуется для простых случаев успеха):
+   ```swift
+   struct DeleteRequest: NetworkRequest {
+       typealias Response = EmptyResponse
+       // emptyResponseHandler предоставляется автоматически
+   }
+   ```
+   Лучше всего для конечных точек, которые возвращают 204 No Content или пустые тела, когда вам нужно только подтвердить успех. Реализация по умолчанию игнорирует любые данные и возвращает `EmptyResponse()`.
+
+2. **Используйте `StatusCodeResponse`** (когда нужны HTTP метаданные):
+   ```swift
+   struct UpdateRequest: NetworkRequest {
+       typealias Response = StatusCodeResponse
+       // emptyResponseHandler автоматически извлекает код состояния и заголовки
+   }
+   ```
+   Лучше всего, когда вам нужно проверить HTTP код состояния или заголовки из ответа. Реализация по умолчанию копирует код состояния и заголовки из `HTTPURLResponse`.
+
+3. **Предоставьте кастомный `emptyResponseHandler`** (для продвинутых случаев):
+   ```swift
+   struct CustomRequest: NetworkRequest {
+       typealias Response = MyCustomResponse
+       
+       var emptyResponseHandler: ((HTTPURLResponse) throws -> MyCustomResponse)? {
+           { response in
+               MyCustomResponse(
+                   status: response.statusCode,
+                   customHeader: response.value(forHTTPHeaderField: "X-Custom")
+               )
+           }
+       }
+   }
+   ```
+   Нужно только когда вы должны сформировать кастомный тип ответа из заголовков, кода состояния или других метаданных, сопровождающих пустой payload.
 
 #### `var jsonDecoder: JSONDecoder { get }`
 Предоставляет экземпляр декодера для JSON ответов. По умолчанию `JSONDecoder()`.
