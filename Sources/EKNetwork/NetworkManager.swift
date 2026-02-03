@@ -308,6 +308,8 @@ public protocol NetworkRequest {
     func decodeResponse(data: Data, response: URLResponse) throws -> Response
 
     /// Optional handler used when the server returns an empty body.
+    /// `StatusCodeResponse` and `EmptyResponse` already provide default handlers,
+    /// so override this only when you need to build a custom response from the status code, headers, or other metadata.
     var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }
 
     /// Provides a decoder instance for JSON responses.

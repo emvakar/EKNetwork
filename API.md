@@ -133,6 +133,8 @@ Should the request allow retries and token refresh on 401 Unauthorized? Defaults
 #### `var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }`
 Optional handler used when the server returns an empty body. Defaults to `nil`.
 
+When the endpoint returns a successful status with zero-length payload, `NetworkRequest` invokes this handler instead of trying to decode JSON. If you leave it `nil`, `decodeResponse` throws `NetworkError.emptyResponse`. Convenience defaults are already provided for `Response == EmptyResponse` and `Response == StatusCodeResponse`, so override this handler only when you need to synthesize a custom response from headers, status code, or other metadata that accompanies the empty payload.
+
 #### `var jsonDecoder: JSONDecoder { get }`
 Provides a decoder instance for JSON responses. Defaults to `JSONDecoder()`.
 
@@ -412,6 +414,8 @@ public struct StatusCodeResponse: Decodable, Equatable {
 }
 ```
 
+Use this response when success is conveyed solely through the HTTP metadata. The default `emptyResponseHandler` for `Response == StatusCodeResponse` copies the status code and headers from the empty `HTTPURLResponse`, so you get those values without decoding a body.
+
 ### EmptyResponse
 
 Represents an empty payload. Useful for endpoints that only signal success via status code.
@@ -421,6 +425,8 @@ public struct EmptyResponse: Decodable, Equatable {
     public init() {}
 }
 ```
+
+`EmptyResponse` is handy for endpoints that return 204/empty bodies. The request's default `decodeResponse` returns `EmptyResponse()` immediately and ignores any server payload, so you can treat the response type as a void success marker.
 
 ---
 
@@ -495,4 +501,3 @@ public protocol URLSessionProtocol {
 - 📚 **[API_RU.md](API_RU.md)** - Полный справочник API на русском языке
 
 ---
-

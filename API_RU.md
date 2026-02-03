@@ -130,6 +130,8 @@ HTTP метод для запроса.
 #### `var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { get }`
 Опциональный обработчик, используемый, когда сервер возвращает пустое тело. По умолчанию `nil`.
 
+Когда сервер отвечает успешным кодом и нулевой длиной тела, `NetworkRequest` вызывает этот обработчик вместо JSON-декодирования. Если оставить `nil`, `decodeResponse` выбросит `NetworkError.emptyResponse`. Для `Response == EmptyResponse` и `Response == StatusCodeResponse` уже есть стандартные реализации, которые возвращают эти типы, поэтому переопределяйте `emptyResponseHandler` только когда нужно сформировать кастомный результат на основе заголовков или кодов состояния, сопровождающих пустой payload.
+
 #### `var jsonDecoder: JSONDecoder { get }`
 Предоставляет экземпляр декодера для JSON ответов. По умолчанию `JSONDecoder()`.
 
@@ -400,6 +402,8 @@ public struct StatusCodeResponse: Decodable, Equatable {
 }
 ```
 
+Используйте этот тип, когда вам важны только код состояния и заголовки, а тело можно игнорировать. Стандартный `emptyResponseHandler` для `Response == StatusCodeResponse` копирует код и заголовки из пустого `HTTPURLResponse`, поэтому вы получаете эти значения без декодирования тела.
+
 ### EmptyResponse
 
 Представляет пустую полезную нагрузку. Полезно для конечных точек, которые только сигнализируют об успехе через код состояния.
@@ -409,6 +413,8 @@ public struct EmptyResponse: Decodable, Equatable {
     public init() {}
 }
 ```
+
+`EmptyResponse` годится для сценариев, где сервер возвращает 204/пустое тело и вам нужно только подтвердить успех. Реализация `decodeResponse` по умолчанию сразу возвращает `EmptyResponse()` и игнорирует payload, так что вы можете рассматривать этот тип как маркер void-успеха.
 
 ---
 
@@ -477,4 +483,3 @@ public protocol URLSessionProtocol {
 ---
 
 [English version](API.md)
-
