@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- Expanded supported HTTP methods to include `HEAD`, `OPTIONS`, `TRACE`, and `CONNECT` alongside the existing verbs.
+
+### Changed
+- CI now tags and creates a GitHub release automatically after successful tests on `main`.
 
 ## [1.4.2] - 2026-02-03
 

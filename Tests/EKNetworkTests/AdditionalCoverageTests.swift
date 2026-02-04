@@ -306,6 +306,10 @@ func testHTTPMethodRawValues() async throws {
     #expect(HTTPMethod.put.rawValue == "PUT")
     #expect(HTTPMethod.delete.rawValue == "DELETE")
     #expect(HTTPMethod.patch.rawValue == "PATCH")
+    #expect(HTTPMethod.head.rawValue == "HEAD")
+    #expect(HTTPMethod.options.rawValue == "OPTIONS")
+    #expect(HTTPMethod.trace.rawValue == "TRACE")
+    #expect(HTTPMethod.connect.rawValue == "CONNECT")
 }
 
 // MARK: - Edge Cases Tests
@@ -986,4 +990,3 @@ func testRetryPolicyShouldRetryClosure() async throws {
     #expect(retryBox.get() == true)
     RetryProtocol.attempt?.deallocate()
 }
-

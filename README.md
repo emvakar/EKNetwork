@@ -675,7 +675,7 @@ func testSignIn() async throws {
 
 EKNetwork has comprehensive test coverage (115 tests, 99.42% code coverage) and provides protocols for easy testing:
 
-- ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH)
+- ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query parameters
 - ✅ Various body types (JSON, Form URL Encoded, Multipart, Raw Data)
 - ✅ Retry policy
