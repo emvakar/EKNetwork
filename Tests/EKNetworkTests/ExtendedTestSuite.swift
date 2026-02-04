@@ -44,6 +44,26 @@ func testHTTPMethodPatch() {
     #expect(HTTPMethod.patch.rawValue == "PATCH")
 }
 
+@Test("HTTPMethod head raw value")
+func testHTTPMethodHead() {
+    #expect(HTTPMethod.head.rawValue == "HEAD")
+}
+
+@Test("HTTPMethod options raw value")
+func testHTTPMethodOptions() {
+    #expect(HTTPMethod.options.rawValue == "OPTIONS")
+}
+
+@Test("HTTPMethod trace raw value")
+func testHTTPMethodTrace() {
+    #expect(HTTPMethod.trace.rawValue == "TRACE")
+}
+
+@Test("HTTPMethod connect raw value")
+func testHTTPMethodConnect() {
+    #expect(HTTPMethod.connect.rawValue == "CONNECT")
+}
+
 // MARK: - NetworkError
 
 @Test("NetworkError invalidURL case")

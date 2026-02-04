@@ -638,7 +638,7 @@ func testSignIn() async throws {
 
 EKNetwork имеет полное тестовое покрытие (21 тест) и предоставляет протоколы для легкого тестирования:
 
-- ✅ Все HTTP методы (GET, POST, PUT, DELETE, PATCH)
+- ✅ Все HTTP методы (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query параметры
 - ✅ Различные типы body (JSON, Form URL Encoded, Multipart, Raw Data)
 - ✅ Retry policy
@@ -755,4 +755,3 @@ EKNetwork доступен под лицензией MIT. См. [LICENSE](LICENS
 [⭐ Поставьте звезду, если проект полезен для вас!](#)
 
 </div>
-

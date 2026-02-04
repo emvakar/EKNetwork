@@ -225,7 +225,11 @@ func testHTTPMethodRawValuesValidation() async throws {
         (.post, "POST"),
         (.put, "PUT"),
         (.delete, "DELETE"),
-        (.patch, "PATCH")
+        (.patch, "PATCH"),
+        (.head, "HEAD"),
+        (.options, "OPTIONS"),
+        (.trace, "TRACE"),
+        (.connect, "CONNECT")
     ]
     
     for (method, expected) in methods {
@@ -330,4 +334,3 @@ func testRequestWithAllOptionalParameters() async throws {
     let response = try await manager.send(FullRequest(), accessToken: nil)
     #expect(response.value == "full")
 }
-

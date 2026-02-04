@@ -891,6 +891,10 @@ func testHTTPMethods() async throws {
     try await testMethod(.put, expectedMethod: "PUT")
     try await testMethod(.delete, expectedMethod: "DELETE")
     try await testMethod(.patch, expectedMethod: "PATCH")
+    try await testMethod(.head, expectedMethod: "HEAD")
+    try await testMethod(.options, expectedMethod: "OPTIONS")
+    try await testMethod(.trace, expectedMethod: "TRACE")
+    try await testMethod(.connect, expectedMethod: "CONNECT")
 }
 
 @MainActor
