@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+
+### Changed
+
+## [1.5.0] - 2026-02-11
+
+### Added
 - Expanded supported HTTP methods to include `HEAD`, `OPTIONS`, `TRACE`, and `CONNECT` alongside the existing verbs.
 - Global response decoder support via `NetworkManager.responseDecoderProvider`, with per-request opt-out using `allowsResponseDecoderOverride`.
 
