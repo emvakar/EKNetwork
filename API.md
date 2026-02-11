@@ -29,7 +29,8 @@ public init(
     baseURL: @escaping (() -> URL),
     session: URLSessionProtocol = URLSession.shared,
     loggerSubsystem: String = "com.yourapp.networking",
-    userAgentConfiguration: UserAgentConfiguration? = nil
+    userAgentConfiguration: UserAgentConfiguration? = nil,
+    responseDecoderProvider: (() -> JSONDecoder)? = nil
 )
 ```
 
@@ -38,6 +39,7 @@ public init(
 - `session`: The `URLSessionProtocol` to use for making requests (defaults to `URLSession.shared`)
 - `loggerSubsystem`: The subsystem identifier for the `Logger` instance
 - `userAgentConfiguration`: Optional User-Agent configuration
+- `responseDecoderProvider`: Optional global JSON decoder provider for responses (overrides per-request decoding when enabled)
 
 **Example:**
 ```swift
@@ -61,6 +63,9 @@ Optional token refresher to handle authentication token renewal. When set, autom
 
 #### `userAgentConfiguration: UserAgentConfiguration?`
 User-Agent configuration. If set, automatically adds User-Agent header to all requests.
+
+#### `responseDecoderProvider: (() -> JSONDecoder)?`
+Optional global decoder provider for JSON responses. If set, it can override per-request decoding.
 
 ### Methods
 
@@ -177,6 +182,9 @@ Provides a decoder instance for JSON responses. Defaults to `JSONDecoder()`.
 
 #### `var jsonEncoder: JSONEncoder { get }`
 Provides an encoder instance for JSON request bodies. Defaults to `JSONEncoder()`.
+
+#### `var allowsResponseDecoderOverride: Bool { get }`
+Whether `NetworkManager` is allowed to override decoding for this request when a global decoder is configured. Defaults to `true`.
 
 ### Methods
 

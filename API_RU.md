@@ -29,7 +29,8 @@ public init(
     baseURL: @escaping (() -> URL),
     session: URLSessionProtocol = URLSession.shared,
     loggerSubsystem: String = "com.yourapp.networking",
-    userAgentConfiguration: UserAgentConfiguration? = nil
+    userAgentConfiguration: UserAgentConfiguration? = nil,
+    responseDecoderProvider: (() -> JSONDecoder)? = nil
 )
 ```
 
@@ -38,6 +39,7 @@ public init(
 - `session`: `URLSessionProtocol` для выполнения запросов (по умолчанию `URLSession.shared`)
 - `loggerSubsystem`: Идентификатор подсистемы для экземпляра `Logger`
 - `userAgentConfiguration`: Опциональная конфигурация User-Agent
+- `responseDecoderProvider`: Опциональный глобальный JSON-декодер для ответов (может переопределять декодирование запросов)
 
 **Пример:**
 ```swift
@@ -58,6 +60,9 @@ let manager = NetworkManager(baseURL: { AppSettings.shared.apiBaseURL })
 
 #### `userAgentConfiguration: UserAgentConfiguration?`
 Конфигурация User-Agent. При установке автоматически добавляет заголовок User-Agent ко всем запросам.
+
+#### `responseDecoderProvider: (() -> JSONDecoder)?`
+Опциональный глобальный декодер JSON-ответов. Если задан, может переопределять декодирование на уровне запросов.
 
 ### Методы
 
@@ -174,6 +179,9 @@ HTTP метод для запроса.
 
 #### `var jsonEncoder: JSONEncoder { get }`
 Предоставляет экземпляр кодировщика для JSON тел запросов. По умолчанию `JSONEncoder()`.
+
+#### `var allowsResponseDecoderOverride: Bool { get }`
+Разрешает ли `NetworkManager` переопределять декодирование этого запроса при наличии глобального декодера. По умолчанию `true`.
 
 ### Методы
 

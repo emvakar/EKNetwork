@@ -581,6 +581,100 @@ func testCustomErrorDecoder() async throws {
 }
 
 @MainActor
+@Test("global response decoder overrides per-request decoding when allowed")
+func testGlobalResponseDecoderOverride() async throws {
+    struct DateResponse: Decodable, Equatable {
+        let dateOfBirth: Date
+    }
+
+    struct DateRequest: NetworkRequest {
+        typealias Response = DateResponse
+        var path: String { "/profile" }
+        var method: HTTPMethod { .get }
+    }
+
+    class DateProtocol: URLProtocol {
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            guard let url = request.url else { return }
+            let payload = #"{"dateOfBirth":"2020-01-02T00:00:00Z"}"#.data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: payload)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [DateProtocol.self]
+    let manager = NetworkManager(
+        baseURL: { URL(string: "https://api.test")! },
+        session: URLSession(configuration: config),
+        responseDecoderProvider: {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return decoder
+        }
+    )
+
+    let response = try await manager.send(DateRequest(), accessToken: nil)
+    let expected = ISO8601DateFormatter().date(from: "2020-01-02T00:00:00Z")
+    #expect(response.dateOfBirth == expected, "Should decode date using global decoder")
+}
+
+@MainActor
+@Test("global response decoder can be disabled per request")
+func testGlobalResponseDecoderOverrideDisabled() async throws {
+    struct DateResponse: Decodable, Equatable {
+        let dateOfBirth: Date
+    }
+
+    struct DateRequest: NetworkRequest {
+        typealias Response = DateResponse
+        var path: String { "/profile" }
+        var method: HTTPMethod { .get }
+        var allowsResponseDecoderOverride: Bool { false }
+        var jsonDecoder: JSONDecoder {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return decoder
+        }
+    }
+
+    class DateProtocol: URLProtocol {
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            guard let url = request.url else { return }
+            let payload = #"{"dateOfBirth":"2020-01-02T00:00:00Z"}"#.data(using: .utf8)!
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: payload)
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [DateProtocol.self]
+    let manager = NetworkManager(
+        baseURL: { URL(string: "https://api.test")! },
+        session: URLSession(configuration: config),
+        responseDecoderProvider: {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .secondsSince1970
+            return decoder
+        }
+    )
+
+    let response = try await manager.send(DateRequest(), accessToken: nil)
+    let expected = ISO8601DateFormatter().date(from: "2020-01-02T00:00:00Z")
+    #expect(response.dateOfBirth == expected, "Should decode date using request decoder when override disabled")
+}
+
+@MainActor
 @Test("retry policy retries on transient errors")
 func testRetryPolicy() async throws {
     struct RetryRequest: NetworkRequest {

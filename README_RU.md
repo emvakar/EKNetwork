@@ -391,6 +391,57 @@ struct DateRequest: NetworkRequest {
 }
 ```
 
+#### Глобальный декодер ответов (опционально)
+
+Если нужна единая стратегия декодирования для всех запросов (например, гибкие даты), можно передать глобальный декодер в `NetworkManager`.
+
+```swift
+let network = NetworkManager(
+    baseURL: URL(string: "https://api.example.com")!,
+    responseDecoderProvider: {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+)
+```
+
+По умолчанию глобальный декодер применяется только если запрос это разрешает.
+Чтобы отключить для конкретного запроса (если используется кастомный `decodeResponse`), задайте:
+
+```swift
+var allowsResponseDecoderOverride: Bool { false }
+```
+
+Пример: гибкое декодирование даты (строка или unix seconds):
+
+```swift
+let network = NetworkManager(
+    baseURL: URL(string: "https://api.example.com")!,
+    responseDecoderProvider: {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            if let seconds = try? container.decode(Double.self) {
+                return Date(timeIntervalSince1970: seconds)
+            }
+            if let string = try? container.decode(String.self) {
+                if let date = ISO8601DateFormatter().date(from: string) {
+                    return date
+                }
+                let df = DateFormatter()
+                df.locale = Locale(identifier: "en_US_POSIX")
+                df.timeZone = TimeZone(secondsFromGMT: 0)
+                df.dateFormat = "yyyy-MM-dd"
+                if let date = df.date(from: string) { return date }
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid date")
+        }
+        return decoder
+    }
+)
+```
+
 #### Form URL Encoded
 
 ```swift

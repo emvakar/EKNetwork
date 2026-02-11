@@ -321,6 +321,10 @@ public protocol NetworkRequest {
 
     /// Provides an encoder instance for JSON request bodies.
     var jsonEncoder: JSONEncoder { get }
+
+    /// Whether `NetworkManager` is allowed to override the response decoder for this request.
+    /// Defaults to `true`. Set to `false` if you rely on a custom `decodeResponse` implementation.
+    var allowsResponseDecoderOverride: Bool { get }
 }
 
 /// Default implementation
@@ -339,6 +343,7 @@ public extension NetworkRequest {
     var emptyResponseHandler: ((HTTPURLResponse) throws -> Response)? { nil }
     var jsonDecoder: JSONDecoder { JSONDecoder() }
     var jsonEncoder: JSONEncoder { JSONEncoder() }
+    var allowsResponseDecoderOverride: Bool { true }
 
     func decodeResponse(data: Data, response: URLResponse) throws -> Response {
         if data.isEmpty {
@@ -496,6 +501,9 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     public var tokenRefresher: TokenRefreshProvider?
     /// User-Agent configuration. If set, automatically adds User-Agent header to all requests.
     public var userAgentConfiguration: UserAgentConfiguration?
+    /// Optional global response decoder provider. If set, it can override per-request decoding.
+    /// Useful for applying consistent decoding strategies (e.g. flexible date parsing) across the app.
+    public var responseDecoderProvider: (() -> JSONDecoder)?
     private let logger: Logger
 
     /// Initializes a `NetworkManager` with the given configuration.
@@ -505,15 +513,18 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     ///   - session: The `URLSessionProtocol` to use for making requests. Defaults to `URLSession.shared`.
     ///   - loggerSubsystem: The subsystem identifier used for the `Logger` instance. Defaults to "com.yourapp.networking".
     ///   - userAgentConfiguration: Optional User-Agent configuration. If provided, User-Agent header will be automatically set for all requests. If nil, User-Agent is not set.
+    ///   - responseDecoderProvider: Optional decoder provider for all responses. If set, it can override per-request decoding.
     public init(
         baseURL: @escaping (() -> URL),
         session: URLSessionProtocol = URLSession.shared,
         loggerSubsystem: String = "com.yourapp.networking",
-        userAgentConfiguration: UserAgentConfiguration? = nil
+        userAgentConfiguration: UserAgentConfiguration? = nil,
+        responseDecoderProvider: (() -> JSONDecoder)? = nil
     ) {
         self.baseURL = baseURL
         self.session = session
         self.userAgentConfiguration = userAgentConfiguration
+        self.responseDecoderProvider = responseDecoderProvider
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
     }
 
@@ -522,9 +533,16 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
         baseURL: URL,
         session: URLSessionProtocol = URLSession.shared,
         loggerSubsystem: String = "com.yourapp.networking",
-        userAgentConfiguration: UserAgentConfiguration? = nil
+        userAgentConfiguration: UserAgentConfiguration? = nil,
+        responseDecoderProvider: (() -> JSONDecoder)? = nil
     ) {
-        self.init(baseURL: { baseURL }, session: session, loggerSubsystem: loggerSubsystem, userAgentConfiguration: userAgentConfiguration)
+        self.init(
+            baseURL: { baseURL },
+            session: session,
+            loggerSubsystem: loggerSubsystem,
+            userAgentConfiguration: userAgentConfiguration,
+            responseDecoderProvider: responseDecoderProvider
+        )
     }
 
     /// Sends a network request and decodes the response.
@@ -685,7 +703,7 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
                 throw NetworkError.unauthorized
             }
             try parseError(response, request, data)
-            let decoded = try request.decodeResponse(data: data, response: response)
+            let decoded = try decodeResponse(data: data, response: response, request: request)
             logger.info("✅ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .private) SUCCESS")
             return decoded
 
@@ -709,6 +727,19 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     /// This is triggered when a 401 Unauthorized response is received.
     private func refreshTokenIfNeeded() async throws {
         try await tokenRefresher?.refreshTokenIfNeeded()
+    }
+
+    /// Decodes a response using a global override decoder when provided.
+    /// Falls back to the request's `decodeResponse` implementation if no override is configured.
+    private func decodeResponse<T: NetworkRequest>(data: Data, response: URLResponse, request: T) throws -> T.Response {
+        guard let overrideDecoder = responseDecoderProvider?(), request.allowsResponseDecoderOverride else {
+            return try request.decodeResponse(data: data, response: response)
+        }
+        // Preserve request-specific empty-response handling.
+        if data.isEmpty {
+            return try request.decodeResponse(data: data, response: response)
+        }
+        return try overrideDecoder.decode(T.Response.self, from: data)
     }
     
 
