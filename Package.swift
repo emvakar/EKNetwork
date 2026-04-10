@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "EKNetwork",
     platforms: [
-        .iOS(.v18),
+        .iOS(.v15),
         .macOS(.v15),
     ],
     products: [
