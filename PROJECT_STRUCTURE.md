@@ -18,12 +18,21 @@ EKNetwork/
 │
 ├── Sources/                    # Library source code
 │   └── EKNetwork/
-│       ├── NetworkManager.swift # Main library code
-│       └── Version.swift       # Library version
+│       ├── NetworkManager.swift # Main library code (request pipeline, retry, token refresh)
+│       ├── Streaming.swift      # Streaming responses: NDJSON / SSE / chunked transfer (since 1.6.0)
+│       ├── ProgressSessionManager.swift # Shared session for upload/download progress
+│       ├── EKNetworkVersion.swift # Runtime version resolution helper
+│       └── Version.swift       # Library version (auto-updated from git tag)
 │
 ├── Tests/                      # Tests
 │   └── EKNetworkTests/
-│       └── NetworkManagerTests.swift # Unit tests
+│       ├── NetworkManagerTests.swift # Unit tests for NetworkManager / send pipeline
+│       ├── StreamingTests.swift      # Unit tests for stream(_:) pipeline
+│       ├── HighCoverageTests.swift   # Edge-case coverage
+│       ├── CoverageImprovementsTests.swift # Additional coverage
+│       ├── ExtendedTestSuite.swift   # Extended scenarios
+│       ├── ExtendedCoverageTests.swift # Extended coverage
+│       └── AdditionalCoverageTests.swift # Misc coverage
 │
 ├── scripts/                    # Development scripts
 │   ├── release.sh             # Release script
@@ -72,13 +81,18 @@ EKNetwork/
 ### Source Code
 
 - **Sources/EKNetwork/** - Main library code
-  - `NetworkManager.swift` - Main class for network operations
-  - `Version.swift` - Library version
+  - `NetworkManager.swift` - Main class for network operations (request building, retry policy, token refresh, JSON decoding)
+  - `Streaming.swift` - Streaming response API: `URLSessionStreamingProtocol`, `NetworkStreaming`, `StreamingResponse`, `StreamingError`, `NetworkManager.stream(_:accessToken:)` (since 1.6.0)
+  - `ProgressSessionManager.swift` - Shared `URLSession` for upload/download progress requests
+  - `EKNetworkVersion.swift` - Runtime version resolution (embedded → env var → bundle → git tag)
+  - `Version.swift` - Embedded library version string (auto-updated from git tag during release)
 
 ### Tests
 
 - **Tests/EKNetworkTests/** - Unit tests for the library
-  - `NetworkManagerTests.swift` - Tests for NetworkManager
+  - `NetworkManagerTests.swift` - Tests for NetworkManager / `send(_:)` pipeline
+  - `StreamingTests.swift` - Tests for `stream(_:accessToken:)` pipeline (NDJSON, CRLF, 401 refresh, error decoding)
+  - Coverage suites: `HighCoverageTests`, `CoverageImprovementsTests`, `ExtendedTestSuite`, `ExtendedCoverageTests`, `AdditionalCoverageTests`
 
 ### Scripts
 

@@ -496,7 +496,19 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     /// The base URL provider; each request calls this closure to get the current base URL.
     /// Pass a closure (e.g. `{ myURL }` or `{ URL(string: "https://api.example.com")! }`) for dynamic or fixed base URL.
     private(set) public var baseURL: () -> URL
-    private let session: URLSessionProtocol
+    let session: URLSessionProtocol
+    /// Streaming session used by `stream(...)`.
+    ///
+    /// Resolution order (set in `init`):
+    /// 1. explicit `streamingSession` parameter,
+    /// 2. provided `session` if it also conforms to `URLSessionStreamingProtocol` (the default `URLSession` does),
+    /// 3. fallback to `URLSession.shared`.
+    ///
+    /// Existing call sites do not need to pass anything — `URLSession` already conforms to the streaming
+    /// protocol, so streaming "just works" with the default session. Custom mocks of `URLSessionProtocol`
+    /// continue to work for `send(...)`; if you want to mock `stream(...)` too, supply a
+    /// `streamingSession` mock conforming to `URLSessionStreamingProtocol`.
+    let streamingSession: URLSessionStreamingProtocol
     /// Optional token refresher to handle authentication token renewal.
     public var tokenRefresher: TokenRefreshProvider?
     /// User-Agent configuration. If set, automatically adds User-Agent header to all requests.
@@ -504,25 +516,31 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     /// Optional global response decoder provider. If set, it can override per-request decoding.
     /// Useful for applying consistent decoding strategies (e.g. flexible date parsing) across the app.
     public var responseDecoderProvider: (() -> JSONDecoder)?
-    private let logger: Logger
+    let logger: Logger
 
     /// Initializes a `NetworkManager` with the given configuration.
     /// - Parameters:
     ///   - baseURL: The base URL that all request paths will be appended to.
-    ///   - tokenRefresher: Optional token refresher for handling automatic re-authentication (e.g. refresh token logic).
-    ///   - session: The `URLSessionProtocol` to use for making requests. Defaults to `URLSession.shared`.
+    ///   - session: The `URLSessionProtocol` to use for making one-shot requests. Defaults to `URLSession.shared`.
+    ///   - streamingSession: Optional session used by `stream(...)` for byte-stream responses (NDJSON / SSE / chunked transfer).
+    ///       When `nil` (default) the manager reuses `session` if it conforms to `URLSessionStreamingProtocol`,
+    ///       otherwise falls back to `URLSession.shared`. Existing initializers stay source-compatible.
     ///   - loggerSubsystem: The subsystem identifier used for the `Logger` instance. Defaults to "com.yourapp.networking".
     ///   - userAgentConfiguration: Optional User-Agent configuration. If provided, User-Agent header will be automatically set for all requests. If nil, User-Agent is not set.
     ///   - responseDecoderProvider: Optional decoder provider for all responses. If set, it can override per-request decoding.
     public init(
         baseURL: @escaping (() -> URL),
         session: URLSessionProtocol = URLSession.shared,
+        streamingSession: URLSessionStreamingProtocol? = nil,
         loggerSubsystem: String = "com.yourapp.networking",
         userAgentConfiguration: UserAgentConfiguration? = nil,
         responseDecoderProvider: (() -> JSONDecoder)? = nil
     ) {
         self.baseURL = baseURL
         self.session = session
+        self.streamingSession = streamingSession
+            ?? (session as? URLSessionStreamingProtocol)
+            ?? URLSession.shared
         self.userAgentConfiguration = userAgentConfiguration
         self.responseDecoderProvider = responseDecoderProvider
         self.logger = Logger(subsystem: loggerSubsystem, category: "network")
@@ -532,6 +550,7 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     public convenience init(
         baseURL: URL,
         session: URLSessionProtocol = URLSession.shared,
+        streamingSession: URLSessionStreamingProtocol? = nil,
         loggerSubsystem: String = "com.yourapp.networking",
         userAgentConfiguration: UserAgentConfiguration? = nil,
         responseDecoderProvider: (() -> JSONDecoder)? = nil
@@ -539,6 +558,7 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
         self.init(
             baseURL: { baseURL },
             session: session,
+            streamingSession: streamingSession,
             loggerSubsystem: loggerSubsystem,
             userAgentConfiguration: userAgentConfiguration,
             responseDecoderProvider: responseDecoderProvider
@@ -554,7 +574,8 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     }
 
     /// Builds the request URL by normalizing the path, appending it to the base URL, and adding query parameters.
-    private func buildRequestURL<T: NetworkRequest>(_ request: T) throws -> URL {
+    /// Visibility is `internal` so streaming extensions in the same module can reuse the exact URL pipeline.
+    func buildRequestURL<T: NetworkRequest>(_ request: T) throws -> URL {
         guard let normalizedPath = normalizePath(request.path) else {
             throw NetworkError.invalidURL
         }
@@ -571,7 +592,8 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     }
 
     /// Applies default headers, authentication, Accept, and User-Agent to the request.
-    private func applyCommonHeaders<T: NetworkRequest>(to urlRequest: inout URLRequest, request: T, accessToken: (() -> String?)?) {
+    /// Visibility is `internal` so streaming extensions in the same module can reuse the exact header pipeline.
+    func applyCommonHeaders<T: NetworkRequest>(to urlRequest: inout URLRequest, request: T, accessToken: (() -> String?)?) {
         if let headers = request.headers {
             for (key, value) in headers {
                 urlRequest.setValue(value, forHTTPHeaderField: key)
@@ -604,21 +626,27 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
         }
     }
 
-    /// Internal method to perform the network request with retry logic.
+    /// Builds a fully-prepared `URLRequest` for the given `NetworkRequest`.
+    ///
+    /// This method is the single source of truth for URL/header/body construction shared by both
+    /// `send(_:)` (one-shot) and `stream(_:)` (streaming) entry points. Keeping the build pipeline
+    /// in one place guarantees that any custom header (e.g. `X-Device-ID`, `Authorization`,
+    /// `User-Agent`, `Content-Type`) is applied identically regardless of whether the caller
+    /// expects a fully-buffered response or a byte stream.
+    ///
     /// - Parameters:
-    ///   - request: The network request.
-    ///   - shouldRetry: Flag indicating if retry is allowed (used to prevent infinite retries on 401).
-    ///   - attempt: Current retry attempt count.
-    /// - Returns: Decoded response.
-    /// - Throws: Errors if request fails or decoding fails.
-    private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
-        try Task.checkCancellation()
+    ///   - request: The network request describing the endpoint, headers, body, etc.
+    ///   - accessToken: Closure providing the current access token, or `nil` to skip auth header.
+    /// - Returns: A `URLRequest` ready to be passed to `URLSession.data(for:)` or `URLSession.bytes(for:)`.
+    /// - Throws: `NetworkError.invalidURL`, `NetworkError.conflictingBodyTypes`, or
+    ///   `NetworkError.invalidMultipartEncoding` if the request cannot be assembled.
+    func buildURLRequest<T: NetworkRequest>(
+        _ request: T,
+        accessToken: (() -> String?)?
+    ) throws -> URLRequest {
         let url = try buildRequestURL(request)
-        
-        logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .private)")
-        
+
         var urlRequest = URLRequest(url: url)
-        
         urlRequest.httpMethod = request.method.rawValue.uppercased()
         applyCommonHeaders(to: &urlRequest, request: request, accessToken: accessToken)
 
@@ -626,7 +654,7 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
         if request.body != nil && request.multipartData != nil {
             throw NetworkError.conflictingBodyTypes
         }
-        
+
         // Set body if provided.
         if let requestBody = request.body {
             var bodyLength: Int?
@@ -673,6 +701,23 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
             urlRequest.setValue("multipart/form-data; boundary=\(multipart.boundary)", forHTTPHeaderField: "Content-Type")
             urlRequest.setValue("\(multipartData.count)", forHTTPHeaderField: "Content-Length")
         }
+
+        return urlRequest
+    }
+
+    /// Internal method to perform the network request with retry logic.
+    /// - Parameters:
+    ///   - request: The network request.
+    ///   - shouldRetry: Flag indicating if retry is allowed (used to prevent infinite retries on 401).
+    ///   - attempt: Current retry attempt count.
+    /// - Returns: Decoded response.
+    /// - Throws: Errors if request fails or decoding fails.
+    private func performRequest<T: NetworkRequest>(_ request: T, accessToken: (() -> String?)?, shouldRetry: Bool, attempt: Int) async throws -> T.Response {
+        try Task.checkCancellation()
+
+        logger.info("➡️ [NETWORK] [\(request.method.rawValue)] \(request.path, privacy: .private)")
+
+        let urlRequest = try buildURLRequest(request, accessToken: accessToken)
 
         do {
             let (data, response): (Data, URLResponse)
@@ -725,7 +770,10 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
 
     /// Calls the token refresher to refresh authentication tokens if needed.
     /// This is triggered when a 401 Unauthorized response is received.
-    private func refreshTokenIfNeeded() async throws {
+    /// Visibility is `internal` so the streaming extension in the same module can reuse the same
+    /// refresh hook (a streaming request that receives 401 before any bytes are emitted is
+    /// retried once after a successful refresh).
+    func refreshTokenIfNeeded() async throws {
         try await tokenRefresher?.refreshTokenIfNeeded()
     }
 

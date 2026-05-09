@@ -5,7 +5,7 @@
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-156%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-170%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 [![Coverage](https://img.shields.io/badge/Coverage-99.13%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *Легковесная, типобезопасная библиотека для работы с HTTP в Swift приложениях*
@@ -25,6 +25,7 @@ EKNetwork — это современная библиотека для сете
 - **🔄 Автоматический Retry** — Гибкая политика повторных попыток для каждого запроса
 - **🔐 Token Refresh** — Автоматическое обновление токенов при 401 ошибках
 - **📊 Progress Tracking** — Отслеживание прогресса загрузки и выгрузки с поддержкой SwiftUI
+- **🌊 Streaming-ответы** — Полноценная поддержка NDJSON / SSE / chunked transfer через тот же пайплайн `NetworkRequest` (начиная с 1.6.0). См. [API_RU.md](API_RU.md#стриминг-ndjson--sse).
 - **🎨 Гибкая конфигурация** — Настройка JSON кодирования/декодирования для каждого запроса
 - **🧪 Тестируемость** — Протоколы для легкого мокирования и тестирования
 - **📦 Zero Dependencies** — Никаких внешних зависимостей, только стандартная библиотека Swift

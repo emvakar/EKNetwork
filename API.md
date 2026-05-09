@@ -12,6 +12,7 @@ Complete API documentation for EKNetwork library.
 - [RetryPolicy](#retrypolicy)
 - [NetworkProgress](#networkprogress)
 - [TokenRefreshProvider](#tokenrefreshprovider)
+- [Streaming (NDJSON / SSE)](#streaming-ndjson--sse)
 - [Error Types](#error-types)
 - [Response Types](#response-types)
 - [UserAgentConfiguration](#useragentconfiguration)
@@ -28,6 +29,7 @@ The main class for managing network requests.
 public init(
     baseURL: @escaping (() -> URL),
     session: URLSessionProtocol = URLSession.shared,
+    streamingSession: URLSessionStreamingProtocol? = nil,
     loggerSubsystem: String = "com.yourapp.networking",
     userAgentConfiguration: UserAgentConfiguration? = nil,
     responseDecoderProvider: (() -> JSONDecoder)? = nil
@@ -37,6 +39,7 @@ public init(
 **Parameters:**
 - `baseURL`: Closure that returns the base URL for each request. Use `{ myURL }` for a fixed URL or a closure that reads from config/environment for dynamic base URL (avoids race conditions when switching environments).
 - `session`: The `URLSessionProtocol` to use for making requests (defaults to `URLSession.shared`)
+- `streamingSession`: Optional session used by `stream(_:accessToken:)` for byte-stream responses (NDJSON / SSE / chunked transfer). When `nil` (default) the manager reuses `session` if it conforms to `URLSessionStreamingProtocol` (default `URLSession` does), otherwise falls back to `URLSession.shared`. Added in 1.6.0; existing call sites stay source-compatible.
 - `loggerSubsystem`: The subsystem identifier for the `Logger` instance
 - `userAgentConfiguration`: Optional User-Agent configuration
 - `responseDecoderProvider`: Optional global JSON decoder provider for responses (overrides per-request decoding when enabled)
@@ -402,6 +405,113 @@ class TokenManager: TokenRefreshProvider {
         let response = try await networkManager.send(refreshRequest, accessToken: nil)
         TokenStore.shared.accessToken = response.accessToken
     }
+}
+```
+
+---
+
+## Streaming (NDJSON / SSE)
+
+> Available since **1.6.0**.
+
+`send(_:accessToken:)` is designed for endpoints that return a complete `Decodable` body. For endpoints that emit data incrementally — newline-delimited JSON, Server-Sent Events, chunked log/inference streams — use `stream(_:accessToken:)`. The streaming entry point reuses the **exact same** request-construction pipeline (headers, `Authorization`, `User-Agent`, body, base URL), so app-level code never has to build a `URLRequest` by hand and risk dropping required headers like `X-Device-ID` or custom auth.
+
+### NetworkStreaming protocol
+
+```swift
+public protocol NetworkStreaming: AnyObject {
+    func stream<T: NetworkRequest>(
+        _ request: T,
+        accessToken: (() -> String?)?
+    ) async throws -> StreamingResponse
+}
+```
+
+`NetworkManager` conforms to both `NetworkManaging` and `NetworkStreaming`. Existing mocks of `NetworkManaging` are unaffected.
+
+### StreamingResponse
+
+```swift
+public struct StreamingResponse: Sendable {
+    public let statusCode: Int
+    public let headers: [String: String]
+    public let bytes: AsyncThrowingStream<UInt8, Error>
+
+    public func lines() -> AsyncThrowingStream<String, Error>
+    public func ndjson<Item: Decodable & Sendable>(
+        as itemType: Item.Type,
+        decoder: JSONDecoder = JSONDecoder()
+    ) -> AsyncThrowingStream<Item, Error>
+}
+```
+
+- `bytes` — raw octet stream, one `UInt8` per element, in arrival order.
+- `lines()` — UTF-8 lines split on `\n`, trailing `\r` trimmed (CRLF-aware), blank lines skipped. Resilient to multi-byte sequences split across TCP segments.
+- `ndjson(as:decoder:)` — one `Decodable` record per non-empty line. A bad line throws and finishes the stream.
+
+Cancellation propagates automatically: breaking out of iteration or cancelling the surrounding `Task` cancels the underlying network task.
+
+### URLSessionStreamingProtocol
+
+```swift
+public protocol URLSessionStreamingProtocol: Sendable {
+    func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
+}
+```
+
+`URLSession` conforms by default (bridges `URLSession.bytes(for:)` into a fully `Sendable` stream). Implement this protocol for unit-testing the streaming pipeline without hitting the network.
+
+### Behaviour summary
+
+| Concern | `send(_:)` | `stream(_:)` |
+|---|---|---|
+| Headers, body, auth | `buildURLRequest` | `buildURLRequest` (same path) |
+| 401 → token refresh + retry | once, when `allowsRetry == true` | once, before any body byte is emitted |
+| Mid-stream 401 | n/a | not retried (body has already started) |
+| Non-2xx error | `HTTPError` / `errorDecoder` | drain ≤1 MiB, then `HTTPError` / `errorDecoder` |
+| Retry policy (`RetryPolicy`) | applied | not applied (streams cannot be replayed deterministically) |
+| Progress (`NetworkProgress`) | applied | not applied |
+
+### StreamingError
+
+```swift
+public enum StreamingError: Error, Equatable {
+    case invalidResponse                 // response was not an HTTPURLResponse
+    case errorPayloadTooLarge(limitBytes: Int)  // non-2xx body exceeded 1 MiB cap
+}
+```
+
+### Example: NDJSON search
+
+```swift
+struct PlayerSearchRequest: NetworkRequest {
+    typealias Response = EmptyResponse  // unused for streaming
+    var path: String { "/api/v1/players/search" }
+    var method: HTTPMethod { .get }
+    var queryParameters: [String: String]? { ["q": query, "stream": "true"] }
+    var headers: [String: String]? { DeviceHeaders.current() }
+    let query: String
+}
+
+let response = try await manager.stream(
+    PlayerSearchRequest(query: "Bobr"),
+    accessToken: { TokenStore.shared.accessToken }
+)
+
+for try await item in response.ndjson(as: SearchEvent.self) {
+    handle(item)            // render incrementally as items arrive
+    if case .end = item { break }
+}
+```
+
+### Example: Server-Sent Events
+
+```swift
+let response = try await manager.stream(MyEventsRequest(), accessToken: nil)
+for try await line in response.lines() {
+    guard line.hasPrefix("data:") else { continue }
+    let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+    process(payload)
 }
 ```
 

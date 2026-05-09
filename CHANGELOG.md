@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+## [1.6.0] - 2026-05-09
+
+### Added
+- **Streaming responses** — first-class support for endpoints that emit data as it is produced (NDJSON, Server-Sent Events, chunked transfer):
+  - New `URLSessionStreamingProtocol` with default `URLSession` conformance (bridges `URLSession.bytes(for:)` into a `Sendable` `AsyncThrowingStream<UInt8, Error>`).
+  - New `NetworkStreaming` protocol exposing `stream(_:accessToken:)`.
+  - New `StreamingResponse` value type with `bytes`, `lines()` (UTF-8 lines, CRLF/LF aware, blank lines skipped) and `ndjson(as:decoder:)` helpers.
+  - New `StreamingError` cases: `invalidResponse`, `errorPayloadTooLarge`.
+  - `NetworkManager.stream(_:accessToken:)` reuses the same request-construction pipeline as `send(_:)` (headers, access token, body, User-Agent, base URL) — no duplication of header logic in app code.
+  - Streaming requests handle 401 by calling `tokenRefresher` and retrying once when `request.allowsRetry == true` (mid-stream 401s are not retried).
+  - Non-2xx streaming responses drain up to 1 MiB into `HTTPError` (or run `request.errorDecoder` if provided), so error handling matches `send(_:)`.
+- **`NetworkManager` initializer** gained a new optional `streamingSession: URLSessionStreamingProtocol? = nil` parameter. When omitted, the manager reuses the regular `session` if it conforms to streaming (default `URLSession` does), otherwise falls back to `URLSession.shared`. Existing initializer call sites stay source-compatible.
+- **Tests**: 8 new tests covering streaming pipeline, NDJSON decoding across chunk boundaries, CRLF handling, 401 + token refresh, custom `errorDecoder`, and default-session resolution. Total **170 tests**.
+
+### Changed
+- **Internal refactor (no behaviour change)**: extracted `NetworkManager.buildURLRequest(_:accessToken:)` so both `send(_:)` and `stream(_:accessToken:)` share a single `URLRequest`-construction routine. Existing test suite (162 tests) passes unchanged.
+
+### Migration (1.5.x → 1.6.0)
+- **No source changes required**. All previous code keeps compiling and behaving identically.
+- To stream a response, call `manager.stream(MyRequest(), accessToken: { token })` instead of `manager.send(...)` and consume `response.ndjson(as: Item.self)` / `response.lines()` / `response.bytes`. Headers and authentication are applied via the same `NetworkRequest.headers` and `accessToken` you already use.
+
 ## [1.5.0] - 2026-02-11
 
 ### Added

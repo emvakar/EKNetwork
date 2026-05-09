@@ -12,6 +12,7 @@
 - [RetryPolicy](#retrypolicy)
 - [NetworkProgress](#networkprogress)
 - [TokenRefreshProvider](#tokenrefreshprovider)
+- [Стриминг (NDJSON / SSE)](#стриминг-ndjson--sse)
 - [Типы ошибок](#типы-ошибок)
 - [Типы ответов](#типы-ответов)
 - [UserAgentConfiguration](#useragentconfiguration)
@@ -28,6 +29,7 @@
 public init(
     baseURL: @escaping (() -> URL),
     session: URLSessionProtocol = URLSession.shared,
+    streamingSession: URLSessionStreamingProtocol? = nil,
     loggerSubsystem: String = "com.yourapp.networking",
     userAgentConfiguration: UserAgentConfiguration? = nil,
     responseDecoderProvider: (() -> JSONDecoder)? = nil
@@ -37,6 +39,7 @@ public init(
 **Параметры:**
 - `baseURL`: Замыкание, возвращающее базовый URL для каждого запроса. Используйте `{ myURL }` для фиксированного URL или замыкание, читающее из конфига/окружения, для динамического базового URL (без гонок при переключении окружений).
 - `session`: `URLSessionProtocol` для выполнения запросов (по умолчанию `URLSession.shared`)
+- `streamingSession`: Опциональная сессия для `stream(_:accessToken:)` (NDJSON / SSE / chunked transfer). Если не передана, менеджер использует `session`, если та поддерживает `URLSessionStreamingProtocol` (`URLSession` поддерживает по умолчанию), иначе — `URLSession.shared`. Добавлено в 1.6.0; существующие вызовы инициализатора остаются совместимыми.
 - `loggerSubsystem`: Идентификатор подсистемы для экземпляра `Logger`
 - `userAgentConfiguration`: Опциональная конфигурация User-Agent
 - `responseDecoderProvider`: Опциональный глобальный JSON-декодер для ответов (может переопределять декодирование запросов)
@@ -399,6 +402,113 @@ class TokenManager: TokenRefreshProvider {
         let response = try await networkManager.send(refreshRequest, accessToken: nil)
         TokenStore.shared.accessToken = response.accessToken
     }
+}
+```
+
+---
+
+## Стриминг (NDJSON / SSE)
+
+> Доступно начиная с **1.6.0**.
+
+`send(_:accessToken:)` рассчитан на эндпоинты, отдающие тело целиком одним `Decodable`-объектом. Для эндпоинтов, которые отдают данные постепенно — newline-delimited JSON, Server-Sent Events, chunked-логи / inference-стримы — используйте `stream(_:accessToken:)`. Стриминг переиспользует **тот же самый** пайплайн построения запроса (заголовки, `Authorization`, `User-Agent`, тело, baseURL), что и `send(_:)`. То есть прикладному коду никогда не нужно собирать `URLRequest` вручную и рисковать потерять обязательные заголовки вроде `X-Device-ID` или кастомной авторизации.
+
+### Протокол NetworkStreaming
+
+```swift
+public protocol NetworkStreaming: AnyObject {
+    func stream<T: NetworkRequest>(
+        _ request: T,
+        accessToken: (() -> String?)?
+    ) async throws -> StreamingResponse
+}
+```
+
+`NetworkManager` соответствует и `NetworkManaging`, и `NetworkStreaming`. Существующие моки `NetworkManaging` остаются рабочими.
+
+### StreamingResponse
+
+```swift
+public struct StreamingResponse: Sendable {
+    public let statusCode: Int
+    public let headers: [String: String]
+    public let bytes: AsyncThrowingStream<UInt8, Error>
+
+    public func lines() -> AsyncThrowingStream<String, Error>
+    public func ndjson<Item: Decodable & Sendable>(
+        as itemType: Item.Type,
+        decoder: JSONDecoder = JSONDecoder()
+    ) -> AsyncThrowingStream<Item, Error>
+}
+```
+
+- `bytes` — поток сырых байт (по одному `UInt8`), в порядке прихода.
+- `lines()` — UTF-8 строки, разделённые `\n`, с обрезкой `\r` (CRLF-aware), пустые строки пропускаются. Корректно собирает многобайтовые UTF-8 последовательности, разрезанные TCP-сегментами.
+- `ndjson(as:decoder:)` — по одному `Decodable`-объекту на каждую непустую строку. Битая строка — стрим завершается ошибкой.
+
+Отмена пробрасывается автоматически: выход из `for try await` или отмена внешнего `Task` отменяет сетевую задачу.
+
+### URLSessionStreamingProtocol
+
+```swift
+public protocol URLSessionStreamingProtocol: Sendable {
+    func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
+}
+```
+
+`URLSession` соответствует протоколу по умолчанию (мостит `URLSession.bytes(for:)` в полностью `Sendable`-стрим). Реализуйте этот протокол в моках, если хотите тестировать стриминговый пайплайн без сети.
+
+### Поведение в сравнении с `send(_:)`
+
+| Аспект | `send(_:)` | `stream(_:)` |
+|---|---|---|
+| Заголовки, тело, авторизация | `buildURLRequest` | `buildURLRequest` (та же точка) |
+| 401 → refresh + retry | один раз, если `allowsRetry == true` | один раз, до того как пришёл хоть один байт тела |
+| 401 в середине стрима | n/a | не ретраится (тело уже начали отдавать) |
+| Не-2xx ошибка | `HTTPError` / `errorDecoder` | drain ≤1 МиБ, затем `HTTPError` / `errorDecoder` |
+| RetryPolicy | применяется | не применяется (стрим нельзя детерминированно проиграть заново) |
+| NetworkProgress | применяется | не применяется |
+
+### StreamingError
+
+```swift
+public enum StreamingError: Error, Equatable {
+    case invalidResponse                          // ответ не HTTPURLResponse
+    case errorPayloadTooLarge(limitBytes: Int)    // тело не-2xx ответа превысило 1 МиБ
+}
+```
+
+### Пример: NDJSON-поиск
+
+```swift
+struct PlayerSearchRequest: NetworkRequest {
+    typealias Response = EmptyResponse  // не используется в стриминге
+    var path: String { "/api/v1/players/search" }
+    var method: HTTPMethod { .get }
+    var queryParameters: [String: String]? { ["q": query, "stream": "true"] }
+    var headers: [String: String]? { DeviceHeaders.current() }
+    let query: String
+}
+
+let response = try await manager.stream(
+    PlayerSearchRequest(query: "Бобр"),
+    accessToken: { TokenStore.shared.accessToken }
+)
+
+for try await item in response.ndjson(as: SearchEvent.self) {
+    handle(item)            // отрисовка по мере поступления
+    if case .end = item { break }
+}
+```
+
+### Пример: Server-Sent Events
+
+```swift
+let response = try await manager.stream(MyEventsRequest(), accessToken: nil)
+for try await line in response.lines() {
+    guard line.hasPrefix("data:") else { continue }
+    let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
+    process(payload)
 }
 ```
 

@@ -8,7 +8,7 @@
 [![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml/badge.svg)](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml)
-[![Tests](https://img.shields.io/badge/Tests-156%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-170%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 [![Coverage](https://img.shields.io/badge/Coverage-99.13%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *A lightweight, type-safe HTTP networking library for Swift applications*
@@ -32,6 +32,7 @@ EKNetwork is a modern networking library that combines ease of use with powerful
 - **🔄 Automatic Retry** — Flexible retry policy for each request
 - **🔐 Token Refresh** — Automatic token refresh on 401 errors
 - **📊 Progress Tracking** — Track upload and download progress with SwiftUI support
+- **🌊 Streaming Responses** — First-class NDJSON / SSE / chunked transfer support via the same `NetworkRequest` pipeline (since 1.6.0). See [API.md](API.md#streaming-ndjson--sse).
 - **🎨 Flexible Configuration** — Customize JSON encoding/decoding per request
 - **🧪 Testable** — Protocols for easy mocking and testing
 - **📦 Zero Dependencies** — No external dependencies, only Swift standard library
