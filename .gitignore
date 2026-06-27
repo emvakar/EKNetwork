@@ -110,3 +110,9 @@ FINAL_ANALYSIS.md
 docs/improvements/
 docs/internal_use/
 IMPROVEMENT_PLAN.md
+CLAUDE.md
+.claude
+.mcp.json
+.claude
+.mcp.*
+CLAUDE*
