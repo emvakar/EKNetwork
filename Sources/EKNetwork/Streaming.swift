@@ -15,9 +15,9 @@
 //  ------------------------------------------
 //  `send(_:)` decodes the full response body into a single `Decodable`. For protocols that emit
 //  events as data arrives (NDJSON, Server-Sent Events, chunked log/streaming endpoints) the
-//  caller needs to consume bytes line-by-line as soon as the server flushes them. URLSession
-//  exposes `bytes(for:)` for this; this file wraps it in the same request-construction pipeline
-//  used by `send(_:)` (headers, access token, User-Agent, base URL, body), so the caller cannot
+//  caller needs to consume bytes as soon as the server flushes them. URLSession exposes
+//  `bytes(for:)` for this; this file wraps it in the same request-construction pipeline used by
+//  `send(_:)` (headers, access token, User-Agent, base URL, body), so the caller cannot
 //  accidentally bypass the network stack and lose required headers.
 //
 //  Public surface introduced (since 1.6.0):
@@ -26,6 +26,17 @@
 //      - `StreamingResponse`                   — value returned from `stream(_:accessToken:)`
 //      - `StreamingError`                      — streaming-specific error cases
 //      - `NetworkManager.stream(_:accessToken:)` — concrete implementation
+//
+//  since 1.7.0: chunks, dataStream(for:), init(...chunks:); bytes/byteStream/init(...bytes:) deprecated
+//
+//  Chunked streaming (since 1.7.0):
+//  --------------------------------
+//  The body is now exposed primarily as `AsyncThrowingStream<Data, Error>` (chunks) instead of
+//  `AsyncThrowingStream<UInt8, Error>` (one byte per element). Byte-level yielding incurred a
+//  per-byte `checkCancellation` + continuation overhead that scaled poorly for MB-sized streams.
+//  Coalescing into ~16 KiB `Data` chunks reduces the per-element overhead by orders of magnitude.
+//  `bytes` and `byteStream(for:)` remain available as deprecated derived wrappers, so existing
+//  callers and mocks keep compiling (additive, minor release).
 //
 
 import os
@@ -37,38 +48,138 @@ import Foundation
 /// and unit-testing of `NetworkManager.stream(_:accessToken:)` without hitting the network.
 ///
 /// The default conformance (provided by `URLSession`) bridges `URLSession.bytes(for:)` to
-/// a fully `Sendable` `AsyncThrowingStream<UInt8, Error>` so the type travels safely across
-/// concurrency domains under Swift 6 strict concurrency.
+/// a fully `Sendable` `AsyncThrowingStream<Data, Error>` (coalesced chunks) so the type travels
+/// safely across concurrency domains under Swift 6 strict concurrency.
 ///
-/// Implement this protocol in tests to feed deterministic bytes into the streaming pipeline.
+/// Implement this protocol in tests to feed deterministic data into the streaming pipeline.
+/// Conformers must implement **at least one** of `dataStream(for:)` / `byteStream(for:)`;
+/// the protocol extension provides mutually-derived default implementations for the other.
 public protocol URLSessionStreamingProtocol: Sendable {
 
-    /// Issues `request` and returns the response head together with an async byte stream.
+    /// Issues `request` and returns the response head together with an async **data chunk** stream.
+    ///
+    /// This is the preferred entry point since 1.7.0: chunks coalesce many octets per element,
+    /// avoiding the per-byte overhead of `byteStream(for:)`.
     ///
     /// - Important: The returned `URLResponse` is delivered **before** the body is fully received,
     ///   so callers can inspect `(response as? HTTPURLResponse)?.statusCode` and decide whether to
-    ///   keep streaming or drain bytes into an error payload.
+    ///   keep streaming or drain the body into an error payload.
+    /// - Parameter request: The fully-prepared `URLRequest` (URL, method, headers, body).
+    /// - Returns: A tuple of (`chunks`, `response`). `chunks` yields `Data` slices in the order
+    ///   received. The stream finishes naturally on EOF and throws on transport errors.
+    func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse)
+
+    /// Issues `request` and returns the response head together with an async byte stream.
+    ///
+    /// - Important: The returned `URLResponse` is delivered **before** the body is fully received.
     /// - Parameter request: The fully-prepared `URLRequest` (URL, method, headers, body).
     /// - Returns: A tuple of (`bytes`, `response`). `bytes` yields raw octets in the order received.
-    ///   The stream finishes naturally on EOF and throws on transport errors.
+    @available(*, deprecated, message: "Use dataStream(for:) — byte-by-byte streaming is inefficient for large bodies. byteStream(for:) is derived from dataStream(for:) and will be removed in a future major release.")
     func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
+}
+
+extension URLSessionStreamingProtocol {
+
+    /// Coalescing chunk size used by the bridge / default implementations (16 KiB).
+    internal static var streamChunkSize: Int { 16 * 1024 }
+
+    /// Default `dataStream(for:)` derived from `byteStream(for:)` by coalescing bytes into
+    /// `streamChunkSize`-sized `Data` chunks. Conformers that implement `byteStream(for:)`
+    /// directly get this for free.
+    public func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        // Deliberately calls the (deprecated) byteStream requirement: a conformer that only
+        // implements byteStream relies on this default. Recursion is impossible here because
+        // any conformer providing byteStream cannot simultaneously rely on the byteStream
+        // default (which derives from dataStream) — at least one is concrete.
+        // The deprecation warning below is accepted consciously: the attribute targets external
+        // callers, while this is the library's own mutually-derived default implementation.
+        let (byteStream, response) = try await byteStream(for: request)
+        let chunkSize = Self.streamChunkSize
+        let stream = AsyncThrowingStream<Data, Error>(Data.self, bufferingPolicy: .unbounded) { continuation in
+            let task = Task {
+                do {
+                    var buffer = Data()
+                    buffer.reserveCapacity(chunkSize)
+                    for try await byte in byteStream {
+                        try Task.checkCancellation()
+                        buffer.append(byte)
+                        if buffer.count >= chunkSize {
+                            continuation.yield(buffer)
+                            buffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    if buffer.isEmpty == false {
+                        continuation.yield(buffer)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+        return (stream, response)
+    }
+
+    /// Default `byteStream(for:)` derived from `dataStream(for:)` by flattening each `Data` chunk
+    /// into individual octets. Conformers that implement `dataStream(for:)` directly get this for
+    /// free, preserving source compatibility for legacy consumers of `byteStream`.
+    @available(*, deprecated, message: "Use dataStream(for:) — byte-by-byte streaming is inefficient for large bodies. byteStream(for:) is derived from dataStream(for:) and will be removed in a future major release.")
+    public func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse) {
+        let (chunks, response) = try await dataStream(for: request)
+        let stream = AsyncThrowingStream<UInt8, Error>(UInt8.self, bufferingPolicy: .unbounded) { continuation in
+            let task = Task {
+                do {
+                    for try await chunk in chunks {
+                        try Task.checkCancellation()
+                        for byte in chunk {
+                            continuation.yield(byte)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+        return (stream, response)
+    }
+
 }
 
 extension URLSession: URLSessionStreamingProtocol {
 
-    /// Default conformance: bridges `URLSession.bytes(for:)` (whose `AsyncBytes` is non-`Sendable`
-    /// in some toolchains) into a `Sendable` `AsyncThrowingStream<UInt8, Error>`.
+    /// Concrete `dataStream(for:)` for `URLSession`: bridges `URLSession.bytes(for:)` (whose
+    /// `AsyncBytes` is non-`Sendable` in some toolchains) into a `Sendable`
+    /// `AsyncThrowingStream<Data, Error>`, coalescing bytes into `streamChunkSize`-sized chunks.
     ///
-    /// The bridging task forwards every byte from `AsyncBytes` to the produced stream,
-    /// propagates errors and EOF, and is cancelled if the consumer aborts iteration.
-    public func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse) {
+    /// - Important: This implementation calls `self.bytes(for:)` **directly** (not `self.byteStream`).
+    ///   `byteStream` for `URLSession` is provided by the protocol-extension default, which derives
+    ///   from `dataStream`. Calling `self.byteStream` here would create infinite mutual recursion;
+    ///   `self.bytes(for:)` is the underlying Foundation primitive and breaks that cycle.
+    public func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
         let (asyncBytes, response) = try await self.bytes(for: request)
-        let stream = AsyncThrowingStream<UInt8, Error>(UInt8.self, bufferingPolicy: .unbounded) { continuation in
+        let chunkSize = Self.streamChunkSize
+        let stream = AsyncThrowingStream<Data, Error>(Data.self, bufferingPolicy: .unbounded) { continuation in
             let task = Task {
                 do {
+                    var buffer = Data()
+                    buffer.reserveCapacity(chunkSize)
                     for try await byte in asyncBytes {
                         try Task.checkCancellation()
-                        continuation.yield(byte)
+                        buffer.append(byte)
+                        if buffer.count >= chunkSize {
+                            continuation.yield(buffer)
+                            buffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    if buffer.isEmpty == false {
+                        continuation.yield(buffer)
                     }
                     continuation.finish()
                 } catch {
@@ -99,11 +210,11 @@ public enum StreamingError: Error, Equatable {
 
 // MARK: - StreamingResponse
 
-/// A streaming HTTP response: status code, headers, and an async byte stream.
+/// A streaming HTTP response: status code, headers, and an async data-chunk stream.
 ///
 /// Returned from `NetworkManager.stream(_:accessToken:)` for endpoints that emit data as it is
 /// produced (NDJSON, SSE, chunked transfer). Use one of the helpers (`lines()`, `ndjson(as:)`)
-/// or iterate `bytes` directly.
+/// or iterate `chunks` directly.
 ///
 /// Cancellation: the underlying network task is cancelled automatically when the consumer
 /// breaks out of iteration or the surrounding `Task` is cancelled.
@@ -116,58 +227,142 @@ public struct StreamingResponse: Sendable {
     /// Response headers, normalized to `[String: String]`.
     public let headers: [String: String]
 
-    /// Raw octet stream of the response body. Each iteration step yields one byte in the order
-    /// it arrived. The stream finishes on EOF and throws on transport / cancellation errors.
+    /// Raw `Data`-chunk stream of the response body. Each iteration step yields a slice of bytes
+    /// (coalesced ~16 KiB) in the order it arrived. The stream finishes on EOF and throws on
+    /// transport / cancellation errors.
     ///
-    /// Consume via `for try await byte in response.bytes` or use the convenience helpers below.
-    public let bytes: AsyncThrowingStream<UInt8, Error>
+    /// Consume via `for try await chunk in response.chunks` or use the convenience helpers below.
+    public let chunks: AsyncThrowingStream<Data, Error>
 
-    /// Initializes a `StreamingResponse`. Marked `public` for testability — production code
-    /// receives this value from `NetworkManager.stream(...)`.
+    /// Raw octet stream of the response body, derived from `chunks`.
+    ///
+    /// - Warning: Deprecated in 1.7.0. Iterating byte-by-byte is inefficient for large bodies.
+    ///   Prefer `chunks` (or the `lines()` / `ndjson(as:)` helpers). This computed wrapper
+    ///   flattens each `Data` chunk into individual octets for source compatibility.
+    @available(*, deprecated, message: "Use chunks (AsyncThrowingStream<Data, Error>) — byte-by-byte iteration is inefficient for large bodies. bytes is derived from chunks and will be removed in a future major release.")
+    public var bytes: AsyncThrowingStream<UInt8, Error> {
+        let chunks = self.chunks
+        return AsyncThrowingStream<UInt8, Error>(UInt8.self, bufferingPolicy: .unbounded) { continuation in
+            let task = Task {
+                do {
+                    for try await chunk in chunks {
+                        try Task.checkCancellation()
+                        for byte in chunk {
+                            continuation.yield(byte)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
+    }
+
+    /// Initializes a `StreamingResponse` from a `Data`-chunk stream (primary, since 1.7.0).
+    /// Marked `public` for testability — production code receives this value from
+    /// `NetworkManager.stream(...)`.
+    public init(
+        statusCode: Int,
+        headers: [String: String],
+        chunks: AsyncThrowingStream<Data, Error>
+    ) {
+        self.statusCode = statusCode
+        self.headers = headers
+        self.chunks = chunks
+    }
+
+    /// Initializes a `StreamingResponse` from a byte stream (legacy).
+    ///
+    /// - Warning: Deprecated in 1.7.0. Use `init(statusCode:headers:chunks:)`. This initializer
+    ///   coalesces the incoming bytes into `Data` chunks to populate `chunks`.
+    @available(*, deprecated, message: "Use init(statusCode:headers:chunks:) — initializing from a byte stream coalesces into chunks and will be removed in a future major release.")
     public init(
         statusCode: Int,
         headers: [String: String],
         bytes: AsyncThrowingStream<UInt8, Error>
     ) {
+        let chunkSize = StreamingResponse.legacyChunkSize
+        let chunks = AsyncThrowingStream<Data, Error>(Data.self, bufferingPolicy: .unbounded) { continuation in
+            let task = Task {
+                do {
+                    var buffer = Data()
+                    buffer.reserveCapacity(chunkSize)
+                    for try await byte in bytes {
+                        try Task.checkCancellation()
+                        buffer.append(byte)
+                        if buffer.count >= chunkSize {
+                            continuation.yield(buffer)
+                            buffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    if buffer.isEmpty == false {
+                        continuation.yield(buffer)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in
+                task.cancel()
+            }
+        }
         self.statusCode = statusCode
         self.headers = headers
-        self.bytes = bytes
+        self.chunks = chunks
     }
+
+    /// Coalescing chunk size for the legacy byte-stream initializer (16 KiB).
+    private static var legacyChunkSize: Int { 16 * 1024 }
 
     /// Decodes the body as a stream of UTF-8 lines, splitting on `\n` and trimming a trailing `\r`.
     ///
     /// Empty lines are skipped (matches the NDJSON convention where a blank line is a no-op
     /// rather than an empty record). Lines that fail UTF-8 decoding are skipped silently to
-    /// keep the stream resilient to multi-byte sequences split across TCP segments — invalid
-    /// bytes are buffered until a newline arrives, then decoded best-effort.
+    /// keep the stream resilient to multi-byte sequences split across TCP segments — bytes are
+    /// buffered across chunk boundaries until a newline arrives, then the whole line is decoded
+    /// best-effort.
     ///
     /// - Returns: An `AsyncThrowingStream<String, Error>` that yields one line per element.
     public func lines() -> AsyncThrowingStream<String, Error> {
-        let bytes = self.bytes
+        let chunks = self.chunks
         return AsyncThrowingStream<String, Error>(String.self, bufferingPolicy: .unbounded) { continuation in
             let task = Task {
-                var buffer: [UInt8] = []
+                var buffer = Data()
                 buffer.reserveCapacity(1024)
+
+                // Emits the accumulated `buffer` as one line: trims a trailing \r, skips empties,
+                // decodes UTF-8 best-effort, and resets the buffer (keeping capacity).
+                func emitLine() {
+                    if buffer.last == 0x0D { buffer.removeLast() } // trim trailing \r (CRLF)
+                    if buffer.isEmpty == false {
+                        if let line = String(data: buffer, encoding: .utf8) {
+                            continuation.yield(line)
+                        }
+                        buffer.removeAll(keepingCapacity: true)
+                    }
+                }
+
                 do {
-                    for try await byte in bytes {
+                    for try await chunk in chunks {
                         try Task.checkCancellation()
-                        if byte == 0x0A { // \n
-                            // Trim trailing \r for CRLF line endings
-                            if buffer.last == 0x0D { buffer.removeLast() }
-                            if buffer.isEmpty == false {
-                                if let line = String(bytes: buffer, encoding: .utf8) {
-                                    continuation.yield(line)
-                                }
-                                buffer.removeAll(keepingCapacity: true)
-                            }
-                        } else {
-                            buffer.append(byte)
+                        var searchStart = chunk.startIndex
+                        while let newlineIndex = chunk[searchStart...].firstIndex(of: 0x0A) {
+                            buffer.append(chunk[searchStart..<newlineIndex])
+                            emitLine()
+                            searchStart = chunk.index(after: newlineIndex)
+                        }
+                        // Carry the tail (after the last \n) across to the next chunk.
+                        if searchStart < chunk.endIndex {
+                            buffer.append(chunk[searchStart...])
                         }
                     }
-                    // Flush trailing line without newline
-                    if buffer.isEmpty == false, let line = String(bytes: buffer, encoding: .utf8) {
-                        continuation.yield(line)
-                    }
+                    // Flush a trailing line without a terminating newline.
+                    emitLine()
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
@@ -226,7 +421,7 @@ public struct StreamingResponse: Sendable {
 public protocol NetworkStreaming: AnyObject {
 
     /// Issues `request` and returns a `StreamingResponse` whose body can be consumed
-    /// incrementally as the server emits bytes.
+    /// incrementally as the server emits data.
     ///
     /// The same request-construction pipeline as `send(_:)` is used: headers, access token,
     /// User-Agent and request body are applied via the manager's standard hooks. This is the
@@ -265,7 +460,7 @@ extension NetworkManager: NetworkStreaming {
     ///   already started sending body bytes by definition).
     /// * On any other non-2xx, drains up to `maxErrorPayloadBytes` of the body, runs
     ///   `request.errorDecoder` if provided, and throws either the custom error or `HTTPError`.
-    /// * Uses `streamingSession` (resolved at init time) for the byte transfer.
+    /// * Uses `streamingSession` (resolved at init time) for the data transfer.
     public func stream<T: NetworkRequest>(
         _ request: T,
         accessToken: (() -> String?)?
@@ -283,7 +478,7 @@ extension NetworkManager: NetworkStreaming {
         logger.info("➡️ [NETWORK STREAM] [\(request.method.rawValue)] \(request.path, privacy: .private)")
 
         let urlRequest = try buildURLRequest(request, accessToken: accessToken)
-        let (bytes, urlResponse) = try await streamingSession.byteStream(for: urlRequest)
+        let (chunks, urlResponse) = try await streamingSession.dataStream(for: urlRequest)
 
         guard let httpResponse = urlResponse as? HTTPURLResponse else {
             throw StreamingError.invalidResponse
@@ -295,15 +490,15 @@ extension NetworkManager: NetworkStreaming {
         // Only when a tokenRefresher is configured: without one the retry is identical to the
         // first request and yields a guaranteed second 401 — a useless round-trip. Mirrors `send`.
         if statusCode == 401, request.allowsRetry, allowRefreshRetry, tokenRefresher != nil {
-            // Drain bytes (small payload expected for 401) so the connection is released cleanly.
-            _ = try? await Self.drain(bytes: bytes, limit: Self.maxErrorPayloadBytes)
+            // Drain chunks (small payload expected for 401) so the connection is released cleanly.
+            _ = try? await Self.drain(chunks: chunks, limit: Self.maxErrorPayloadBytes)
             try await refreshTokenIfNeeded()
             return try await performStream(request, accessToken: accessToken, allowRefreshRetry: false)
         }
 
         // Non-2xx — drain a bounded slice for diagnostics, throw HTTPError or custom-decoded error.
         if !(200..<300).contains(statusCode) {
-            let payload = try await Self.drain(bytes: bytes, limit: Self.maxErrorPayloadBytes)
+            let payload = try await Self.drain(chunks: chunks, limit: Self.maxErrorPayloadBytes)
             if statusCode == 401 {
                 if let customError = request.errorDecoder?(payload) {
                     throw customError
@@ -320,7 +515,7 @@ extension NetworkManager: NetworkStreaming {
             )
         }
 
-        // Success — hand the live byte stream to the caller.
+        // Success — hand the live data stream to the caller.
         let normalizedHeaders: [String: String] = httpResponse.allHeaderFields
             .reduce(into: [:]) { acc, pair in
                 guard let key = pair.key as? String else { return }
@@ -332,24 +527,32 @@ extension NetworkManager: NetworkStreaming {
         return StreamingResponse(
             statusCode: statusCode,
             headers: normalizedHeaders,
-            bytes: bytes
+            chunks: chunks
         )
     }
 
-    /// Drains an `AsyncThrowingStream<UInt8, Error>` into `Data`, capping the buffered size.
+    /// Drains an `AsyncThrowingStream<Data, Error>` into `Data`, capping the buffered size.
     /// Used to materialise a small error payload from a non-2xx streaming response without
     /// risking unbounded memory growth.
+    ///
+    /// A payload of exactly `limit` bytes is accepted; only `> limit` triggers
+    /// `StreamingError.errorPayloadTooLarge`.
     private static func drain(
-        bytes: AsyncThrowingStream<UInt8, Error>,
+        chunks: AsyncThrowingStream<Data, Error>,
         limit: Int
     ) async throws -> Data {
         var buffer = Data()
         buffer.reserveCapacity(min(limit, 16 * 1024))
-        for try await byte in bytes {
-            if buffer.count >= limit {
+        for try await chunk in chunks {
+            if buffer.count + chunk.count > limit {
+                // Top up to the limit for diagnostics, then reject.
+                let remaining = limit - buffer.count
+                if remaining > 0 {
+                    buffer.append(chunk.prefix(remaining))
+                }
                 throw StreamingError.errorPayloadTooLarge(limitBytes: limit)
             }
-            buffer.append(byte)
+            buffer.append(chunk)
         }
         return buffer
     }

@@ -433,7 +433,7 @@ class TokenManager: TokenRefreshProvider {
 
 ## Streaming (NDJSON / SSE)
 
-> Available since **1.6.0**.
+> Available since **1.6.0**. Chunked body (`chunks`, `dataStream(for:)`) added in **1.7.0**.
 
 `send(_:accessToken:)` is designed for endpoints that return a complete `Decodable` body. For endpoints that emit data incrementally — newline-delimited JSON, Server-Sent Events, chunked log/inference streams — use `stream(_:accessToken:)`. The streaming entry point reuses the **exact same** request-construction pipeline (headers, `Authorization`, `User-Agent`, body, base URL), so app-level code never has to build a `URLRequest` by hand and risk dropping required headers like `X-Device-ID` or custom auth.
 
@@ -456,7 +456,20 @@ public protocol NetworkStreaming: AnyObject {
 public struct StreamingResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
-    public let bytes: AsyncThrowingStream<UInt8, Error>
+
+    /// Primary body since 1.7.0 — coalesced `Data` blocks (≈16 KiB).
+    public let chunks: AsyncThrowingStream<Data, Error>
+
+    /// Deprecated since 1.7.0 — computed wrapper over `chunks`. Removed in 2.0.0.
+    @available(*, deprecated, message: "Use `chunks`, `lines()` or `ndjson(as:)`. Removed in 2.0.0.")
+    public var bytes: AsyncThrowingStream<UInt8, Error> { get }
+
+    /// Primary initializer since 1.7.0.
+    public init(statusCode: Int, headers: [String: String], chunks: AsyncThrowingStream<Data, Error>)
+
+    /// Deprecated since 1.7.0 — use `init(statusCode:headers:chunks:)`. Removed in 2.0.0.
+    @available(*, deprecated, message: "Use init(statusCode:headers:chunks:). Removed in 2.0.0.")
+    public init(statusCode: Int, headers: [String: String], bytes: AsyncThrowingStream<UInt8, Error>)
 
     public func lines() -> AsyncThrowingStream<String, Error>
     public func ndjson<Item: Decodable & Sendable>(
@@ -466,21 +479,31 @@ public struct StreamingResponse: Sendable {
 }
 ```
 
-- `bytes` — raw octet stream, one `UInt8` per element, in arrival order.
-- `lines()` — UTF-8 lines split on `\n`, trailing `\r` trimmed (CRLF-aware), blank lines skipped. Resilient to multi-byte sequences split across TCP segments.
-- `ndjson(as:decoder:)` — one `Decodable` record per non-empty line. A bad line throws and finishes the stream.
+- `chunks` — **(since 1.7.0, primary)** raw body as `Data` blocks (≈16 KiB each), in arrival order. **Chunk boundaries are not semantic**: a JSON object, NDJSON line or even a single UTF-8 character may be split across two chunks. Reassemble before decoding (or use `lines()` / `ndjson(as:)`, which do this for you).
+- `bytes` — **(deprecated since 1.7.0, removed in 2.0.0)** raw octet stream, one `UInt8` per element. Now a computed wrapper that flattens `chunks`. Prefer `chunks`.
+- `lines()` — UTF-8 lines split on `\n`, trailing `\r` trimmed (CRLF-aware), blank lines skipped. Reassembles UTF-8 sequences split across chunk boundaries before decoding each line. Signature and semantics unchanged in 1.7.0 — now parses over `Data` chunks (transparent speed-up).
+- `ndjson(as:decoder:)` — one `Decodable` record per non-empty line. A bad line throws and finishes the stream. Signature and semantics unchanged in 1.7.0.
 
 Cancellation propagates automatically: breaking out of iteration or cancelling the surrounding `Task` cancels the underlying network task.
+
+> **Buffering / backpressure.** The underlying stream uses `.unbounded` buffering — bytes are never dropped, but there is **no backpressure** onto the server. If a consumer falls behind a fast producer, chunks accumulate in memory. Consume promptly (or break out of the loop) for very large or unbounded streams.
 
 ### URLSessionStreamingProtocol
 
 ```swift
 public protocol URLSessionStreamingProtocol: Sendable {
+    /// Preferred since 1.7.0. Returns coalesced `Data` chunks.
+    func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse)
+
+    /// Deprecated since 1.7.0 — use `dataStream(for:)`. Removed in 2.0.0.
+    @available(*, deprecated, message: "Use dataStream(for:). Removed in 2.0.0.")
     func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
 }
 ```
 
-`URLSession` conforms by default (bridges `URLSession.bytes(for:)` into a fully `Sendable` stream). Implement this protocol for unit-testing the streaming pipeline without hitting the network.
+`URLSession` conforms by default (bridges `URLSession.bytes(for:)` into a fully `Sendable` chunk stream).
+
+The protocol extension provides **mutually-derived default implementations**: `dataStream(for:)` can be derived from `byteStream(for:)` and vice versa. A conformer (custom session or mock) therefore only needs to implement **at least one** of them — implement `dataStream(for:)` for the recommended path. Do not omit both, or the defaults will recurse.
 
 ### Behaviour summary
 
@@ -533,6 +556,40 @@ for try await line in response.lines() {
     guard line.hasPrefix("data:") else { continue }
     let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
     process(payload)
+}
+```
+
+### Example: raw chunks (since 1.7.0)
+
+```swift
+let response = try await manager.stream(MyDownloadRequest(), accessToken: nil)
+
+var buffer = Data()
+for try await chunk in response.chunks {     // each chunk ≈16 KiB
+    buffer.append(chunk)                      // boundaries are not semantic — accumulate
+}
+// `buffer` now holds the full body; parse it however you like.
+```
+
+### Example: custom mock session
+
+```swift
+// Implement at least one of dataStream(for:) / byteStream(for:).
+// dataStream(for:) is the recommended path since 1.7.0.
+struct MockStreamingSession: URLSessionStreamingProtocol {
+    let payload: Data
+    let status: Int
+
+    func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: status,
+                                       httpVersion: nil, headerFields: nil)!
+        let stream = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(payload)
+            continuation.finish()
+        }
+        return (stream, response)
+    }
+    // byteStream(for:) is supplied by the protocol's default implementation.
 }
 ```
 

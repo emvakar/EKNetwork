@@ -8,8 +8,8 @@
 [![Platform](https://img.shields.io/badge/Platform-iOS%2015%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml/badge.svg)](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml)
-[![Tests](https://img.shields.io/badge/Tests-198%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
-[![Coverage](https://img.shields.io/badge/Coverage-99.29%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-220%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.42%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *A lightweight, type-safe HTTP networking library for Swift applications*
 
@@ -88,7 +88,7 @@ struct GetUserRequest: NetworkRequest {
 ```
 
 #### 🧪 Full Test Coverage
-198 tests cover all major use cases, including edge cases. Code coverage is **99%+** (CI-enforced minimum 99%).
+220 tests cover all major use cases, including edge cases. Code coverage is **99%+** (CI-enforced minimum 99%).
 
 ---
 
@@ -152,7 +152,7 @@ Then add the product to your target:
 ### Requirements
 
 - **Swift**: 6.0+
-- **iOS**: 18.0+
+- **iOS**: 15.0+
 - **macOS**: 15.0+
 - **Xcode**: 16.0+ (for Swift 6.0 support)
 
@@ -397,9 +397,9 @@ struct APIError: Decodable, Error {
 
 ### Advanced Features
 
-#### Streaming Responses (NDJSON / SSE / chunked) — since 1.6.0
+#### Streaming Responses (NDJSON / SSE / chunked) — since 1.6.0 (Data chunks since 1.7.0)
 
-Consume responses as bytes arrive, using the same `NetworkRequest` you already define. Great for NDJSON feeds, Server-Sent Events and chunked log/streaming endpoints.
+Consume responses as data arrives, using the same `NetworkRequest` you already define. Great for NDJSON feeds, Server-Sent Events and chunked log/streaming endpoints.
 
 ```swift
 struct EventsStream: NetworkRequest {
@@ -414,9 +414,9 @@ let response = try await manager.stream(EventsStream(), accessToken: { token })
 for try await event in response.ndjson(as: Event.self) {
     handle(event)
 }
-// …or read raw UTF-8 lines / bytes:
+// …or read raw UTF-8 lines / Data chunks (chunk boundaries are not semantic):
 // for try await line in response.lines() { … }
-// for try await byte in response.bytes { … }
+// for try await chunk in response.chunks { buffer.append(chunk) }
 ```
 
 Headers, authentication, base URL and 401 token-refresh work exactly like `send(_:)`. See [API.md](API.md#streaming-ndjson--sse) for the full surface.
@@ -772,7 +772,7 @@ func testSignIn() async throws {
 
 ## 🧪 Testing
 
-EKNetwork has comprehensive test coverage (198 tests, 99%+ code coverage) and provides protocols for easy testing:
+EKNetwork has comprehensive test coverage (220 tests, 99%+ code coverage) and provides protocols for easy testing:
 
 - ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query parameters

@@ -5,8 +5,8 @@
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-iOS%2015%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-198%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
-[![Coverage](https://img.shields.io/badge/Coverage-99.29%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-220%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.42%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *Легковесная, типобезопасная библиотека для работы с HTTP в Swift приложениях*
 
@@ -81,7 +81,7 @@ struct GetUserRequest: NetworkRequest {
 ```
 
 #### 🧪 Полное тестовое покрытие
-198 тестов покрывают все основные сценарии использования, включая edge cases. Покрытие кода **99%+** (минимум 99%, проверяется в CI).
+220 тестов покрывают все основные сценарии использования, включая edge cases. Покрытие кода **99%+** (минимум 99%, проверяется в CI).
 
 ---
 
@@ -116,7 +116,7 @@ dependencies: [
 ### Требования
 
 - **Swift**: 6.0+
-- **iOS**: 18.0+
+- **iOS**: 15.0+
 - **macOS**: 15.0+
 
 ---
@@ -355,9 +355,9 @@ struct APIError: Decodable, Error {
 
 ### Расширенные возможности
 
-#### Стриминговые ответы (NDJSON / SSE / chunked) — с 1.6.0
+#### Стриминговые ответы (NDJSON / SSE / chunked) — с 1.6.0 (Data-чанки с 1.7.0)
 
-Получайте ответ по мере поступления байтов, используя тот же `NetworkRequest`. Подходит для NDJSON-потоков, Server-Sent Events и chunked log/streaming endpoint'ов.
+Получайте ответ по мере поступления данных, используя тот же `NetworkRequest`. Подходит для NDJSON-потоков, Server-Sent Events и chunked log/streaming endpoint'ов.
 
 ```swift
 struct EventsStream: NetworkRequest {
@@ -372,9 +372,9 @@ let response = try await manager.stream(EventsStream(), accessToken: { token })
 for try await event in response.ndjson(as: Event.self) {
     handle(event)
 }
-// …либо сырые UTF-8 строки / байты:
+// …либо сырые UTF-8 строки / Data-чанки (границы чанков не семантичны):
 // for try await line in response.lines() { … }
-// for try await byte in response.bytes { … }
+// for try await chunk in response.chunks { buffer.append(chunk) }
 ```
 
 Заголовки, аутентификация, base URL и обновление токена на 401 работают так же, как в `send(_:)`. Полное описание — в [API_RU.md](API_RU.md#streaming-ndjson--sse).
@@ -730,7 +730,7 @@ func testSignIn() async throws {
 
 ## 🧪 Тестирование
 
-EKNetwork имеет полное тестовое покрытие (198 тестов, 99%+) и предоставляет протоколы для легкого тестирования:
+EKNetwork имеет полное тестовое покрытие (220 тестов, 99%+) и предоставляет протоколы для легкого тестирования:
 
 - ✅ Все HTTP методы (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query параметры

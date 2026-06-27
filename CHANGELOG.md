@@ -5,7 +5,32 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-**Legend:** ✨ Added · ⚡ Improved · 🐛 Fixed · 🔄 Changed · ⚠️ Breaking · 🧪 Tests · 📝 Docs · 🔧 Infrastructure · 🚀 Migration · 📊 Technical details
+**Legend:** ✨ Added · ⚡ Improved · 🐛 Fixed · 🔄 Changed · ⚠️ Deprecated · ⚠️ Breaking · 🧪 Tests · 📝 Docs · 🔧 Infrastructure · 🚀 Migration · 📊 Technical details
+
+## [1.7.0] - 2026-06-27
+
+### ✨ Added
+- **Chunked streaming body.** `StreamingResponse` now exposes `chunks: AsyncThrowingStream<Data, Error>` as its primary body — data arrives in coalesced `Data` blocks (≈16 KiB) instead of one element per byte. Chunk boundaries are **not** semantically meaningful: a JSON object, NDJSON line or UTF-8 character may straddle two chunks. `lines()` / `ndjson(as:)` handle boundaries for you.
+- **`StreamingResponse.init(statusCode:headers:chunks:)`** — new primary initializer building a response from a chunk stream.
+- **`URLSessionStreamingProtocol.dataStream(for:)`** — new protocol requirement (with a default implementation) returning `(AsyncThrowingStream<Data, Error>, URLResponse)`. This is the recommended method to implement for custom sessions and mocks.
+
+### ⚠️ Deprecated
+- **`StreamingResponse.bytes`** is deprecated (still available) and is now a computed wrapper over `chunks`. Use `chunks`, or `lines()` / `ndjson(as:)`. Scheduled for removal in **2.0.0**.
+- **`StreamingResponse.init(statusCode:headers:bytes:)`** is deprecated in favour of `init(statusCode:headers:chunks:)`. Scheduled for removal in **2.0.0**.
+- **`URLSessionStreamingProtocol.byteStream(for:)`** is deprecated in favour of `dataStream(for:)`. Both have mutually-derived default implementations, so a conformer (custom session or mock) only needs to implement **at least one**. Scheduled for removal in **2.0.0**.
+
+### 🔄 Changed
+- **`lines()` and `ndjson(as:)` now parse over `Data` chunks** instead of individual bytes — same signatures, same semantics (CRLF-aware line splitting, blank lines skipped, UTF-8 sequences split across chunk boundaries handled correctly), with a transparent performance gain. The non-2xx error drain also reads chunk-wise.
+- **Eliminated per-byte `continuation.yield` overhead.** The previous `AsyncThrowingStream<UInt8, Error>` yielded once per octet, paying a `checkCancellation` + continuation cost for every byte; for MB-sized streams this crossed the concurrency boundary millions of times. Coalescing into ~16 KiB chunks reduces those crossings by orders of magnitude. Backpressure is unchanged: the stream still buffers `.unbounded`.
+
+### 🧪 Tests
+- Added coverage for `chunks`, `dataStream(for:)`, the chunk-based `lines()` / `ndjson()` / error-drain paths and the mutually-derived `dataStream` ↔ `byteStream` defaults. Total **220 tests**, coverage **99.42%**.
+
+### 🚀 Migration (1.6.x → 1.7.0)
+- **No source changes required.** `bytes`, `init(...bytes:)` and `byteStream(for:)` keep compiling (with deprecation warnings); `lines()` / `ndjson(as:)` are unchanged.
+- Prefer `for try await chunk in response.chunks { … }` over `response.bytes`.
+- Custom streaming sessions / mocks: implement `dataStream(for:)` (preferred) or keep `byteStream(for:)` — at least one is required.
+- These deprecated symbols will be **removed in 2.0.0**.
 
 ## [1.6.2] - 2026-06-27
 

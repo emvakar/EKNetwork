@@ -430,7 +430,7 @@ class TokenManager: TokenRefreshProvider {
 
 ## Стриминг (NDJSON / SSE)
 
-> Доступно начиная с **1.6.0**.
+> Доступно начиная с **1.6.0**. Чанковое тело (`chunks`, `dataStream(for:)`) добавлено в **1.7.0**.
 
 `send(_:accessToken:)` рассчитан на эндпоинты, отдающие тело целиком одним `Decodable`-объектом. Для эндпоинтов, которые отдают данные постепенно — newline-delimited JSON, Server-Sent Events, chunked-логи / inference-стримы — используйте `stream(_:accessToken:)`. Стриминг переиспользует **тот же самый** пайплайн построения запроса (заголовки, `Authorization`, `User-Agent`, тело, baseURL), что и `send(_:)`. То есть прикладному коду никогда не нужно собирать `URLRequest` вручную и рисковать потерять обязательные заголовки вроде `X-Device-ID` или кастомной авторизации.
 
@@ -453,7 +453,20 @@ public protocol NetworkStreaming: AnyObject {
 public struct StreamingResponse: Sendable {
     public let statusCode: Int
     public let headers: [String: String]
-    public let bytes: AsyncThrowingStream<UInt8, Error>
+
+    /// Первичное тело начиная с 1.7.0 — склеенные блоки `Data` (≈16 КиБ).
+    public let chunks: AsyncThrowingStream<Data, Error>
+
+    /// Deprecated с 1.7.0 — computed-обёртка над `chunks`. Будет удалено в 2.0.0.
+    @available(*, deprecated, message: "Используйте `chunks`, `lines()` или `ndjson(as:)`. Удаляется в 2.0.0.")
+    public var bytes: AsyncThrowingStream<UInt8, Error> { get }
+
+    /// Первичный инициализатор начиная с 1.7.0.
+    public init(statusCode: Int, headers: [String: String], chunks: AsyncThrowingStream<Data, Error>)
+
+    /// Deprecated с 1.7.0 — используйте `init(statusCode:headers:chunks:)`. Удаляется в 2.0.0.
+    @available(*, deprecated, message: "Используйте init(statusCode:headers:chunks:). Удаляется в 2.0.0.")
+    public init(statusCode: Int, headers: [String: String], bytes: AsyncThrowingStream<UInt8, Error>)
 
     public func lines() -> AsyncThrowingStream<String, Error>
     public func ndjson<Item: Decodable & Sendable>(
@@ -463,21 +476,31 @@ public struct StreamingResponse: Sendable {
 }
 ```
 
-- `bytes` — поток сырых байт (по одному `UInt8`), в порядке прихода.
-- `lines()` — UTF-8 строки, разделённые `\n`, с обрезкой `\r` (CRLF-aware), пустые строки пропускаются. Корректно собирает многобайтовые UTF-8 последовательности, разрезанные TCP-сегментами.
-- `ndjson(as:decoder:)` — по одному `Decodable`-объекту на каждую непустую строку. Битая строка — стрим завершается ошибкой.
+- `chunks` — **(с 1.7.0, первичное)** сырое тело в виде блоков `Data` (по ≈16 КиБ), в порядке прихода. **Границы чанков не семантичны**: JSON-объект, NDJSON-строка или даже один UTF-8 символ могут оказаться разрезаны между двумя чанками. Перед декодированием собирайте данные (либо используйте `lines()` / `ndjson(as:)`, которые делают это за вас).
+- `bytes` — **(deprecated с 1.7.0, удаляется в 2.0.0)** поток сырых байт (по одному `UInt8`). Теперь computed-обёртка, разворачивающая `chunks`. Предпочитайте `chunks`.
+- `lines()` — UTF-8 строки, разделённые `\n`, с обрезкой `\r` (CRLF-aware), пустые строки пропускаются. Корректно собирает многобайтовые UTF-8 последовательности, разрезанные границами чанков, перед декодированием каждой строки. Сигнатура и семантика в 1.7.0 не изменились — теперь парсинг идёт по `Data`-чанкам (прозрачный прирост скорости).
+- `ndjson(as:decoder:)` — по одному `Decodable`-объекту на каждую непустую строку. Битая строка — стрим завершается ошибкой. Сигнатура и семантика в 1.7.0 не изменились.
 
 Отмена пробрасывается автоматически: выход из `for try await` или отмена внешнего `Task` отменяет сетевую задачу.
+
+> **Буферизация / backpressure.** Внутренний стрим использует буферизацию `.unbounded` — байты никогда не теряются, но **backpressure на сервер отсутствует**. Если потребитель не успевает за быстрым продьюсером, чанки накапливаются в памяти. Для очень больших или бесконечных потоков читайте без задержек (или выходите из цикла).
 
 ### URLSessionStreamingProtocol
 
 ```swift
 public protocol URLSessionStreamingProtocol: Sendable {
+    /// Предпочтительно начиная с 1.7.0. Возвращает склеенные `Data`-чанки.
+    func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse)
+
+    /// Deprecated с 1.7.0 — используйте `dataStream(for:)`. Удаляется в 2.0.0.
+    @available(*, deprecated, message: "Используйте dataStream(for:). Удаляется в 2.0.0.")
     func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse)
 }
 ```
 
-`URLSession` соответствует протоколу по умолчанию (мостит `URLSession.bytes(for:)` в полностью `Sendable`-стрим). Реализуйте этот протокол в моках, если хотите тестировать стриминговый пайплайн без сети.
+`URLSession` соответствует протоколу по умолчанию (мостит `URLSession.bytes(for:)` в полностью `Sendable`-стрим из чанков).
+
+В расширении протокола есть **взаимно-производные default-реализации**: `dataStream(for:)` выводится из `byteStream(for:)` и наоборот. Поэтому конформеру (кастомной сессии или моку) достаточно реализовать **минимум один** из них — реализуйте `dataStream(for:)` для рекомендуемого пути. Нельзя опускать оба сразу, иначе default-реализации зациклятся.
 
 ### Поведение в сравнении с `send(_:)`
 
@@ -530,6 +553,40 @@ for try await line in response.lines() {
     guard line.hasPrefix("data:") else { continue }
     let payload = line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces)
     process(payload)
+}
+```
+
+### Пример: сырые чанки (с 1.7.0)
+
+```swift
+let response = try await manager.stream(MyDownloadRequest(), accessToken: nil)
+
+var buffer = Data()
+for try await chunk in response.chunks {     // каждый чанк ≈16 КиБ
+    buffer.append(chunk)                      // границы не семантичны — накапливаем
+}
+// `buffer` теперь содержит всё тело; парсите как угодно.
+```
+
+### Пример: кастомная мок-сессия
+
+```swift
+// Реализуйте минимум один из dataStream(for:) / byteStream(for:).
+// dataStream(for:) — рекомендуемый путь начиная с 1.7.0.
+struct MockStreamingSession: URLSessionStreamingProtocol {
+    let payload: Data
+    let status: Int
+
+    func dataStream(for request: URLRequest) async throws -> (AsyncThrowingStream<Data, Error>, URLResponse) {
+        let response = HTTPURLResponse(url: request.url!, statusCode: status,
+                                       httpVersion: nil, headerFields: nil)!
+        let stream = AsyncThrowingStream<Data, Error> { continuation in
+            continuation.yield(payload)
+            continuation.finish()
+        }
+        return (stream, response)
+    }
+    // byteStream(for:) предоставляется default-реализацией протокола.
 }
 ```
 
