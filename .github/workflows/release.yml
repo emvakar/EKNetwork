@@ -1,0 +1,110 @@
+name: Release
+
+# Публикация релиза при пуше тега версии.
+# Поддерживаются как `v1.6.0`, так и «голые» теги вида `1.6.0`.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # 1. Quality gate — тег не превратится в релиз, пока не зелёный
+  # ──────────────────────────────────────────────────────────────
+  verify:
+    name: Build, Test & Coverage
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v3
+        with:
+          swift-version: "6.2"
+
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('**/Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build
+        run: swift build
+
+      - name: Run tests with coverage
+        id: tests
+        run: |
+          swift test --enable-code-coverage 2>&1 | tee test_output.txt
+          TEST_COUNT=$(grep -oE "Test run with [0-9]+ tests" test_output.txt | grep -oE "[0-9]+" | head -1 || echo "0")
+          echo "test_count=${TEST_COUNT:-0}" >> "$GITHUB_OUTPUT"
+          echo "📊 Test count: ${TEST_COUNT:-0}"
+
+      - name: Coverage gate (>= 98%)
+        id: coverage
+        run: |
+          ./scripts/coverage.sh | tee coverage_output.txt
+          COVERAGE=$(grep -oE "Coverage:[[:space:]]+[0-9.]+%" coverage_output.txt | grep -oE "[0-9.]+" | head -1 || echo "0")
+          echo "coverage=${COVERAGE:-0}" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      test_count: ${{ steps.tests.outputs.test_count }}
+      coverage: ${{ steps.coverage.outputs.coverage }}
+
+  # ──────────────────────────────────────────────────────────────
+  # 2. Release — собираем оформленные notes и публикуем
+  # ──────────────────────────────────────────────────────────────
+  release:
+    name: Publish GitHub Release
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version metadata
+        id: meta
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          # Prerelease, если в версии есть суффикс (1.6.1-beta.1 и т.п.)
+          if echo "$VERSION" | grep -q '-'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+          # Предыдущий тег для fallback-генерации
+          PREV_TAG=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+          echo "prev_tag=$PREV_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          PREV_TAG: ${{ steps.meta.outputs.prev_tag }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          TEST_COUNT: ${{ needs.verify.outputs.test_count }}
+          COVERAGE: ${{ needs.verify.outputs.coverage }}
+        run: bash scripts/release_notes.sh > RELEASE_NOTES.md
+      - name: Preview notes in job summary
+        run: cat RELEASE_NOTES.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.meta.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          make_latest: ${{ steps.meta.outputs.prerelease == 'false' }}
