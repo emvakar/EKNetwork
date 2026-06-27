@@ -106,6 +106,26 @@ struct StreamingTests {
         #expect(req.url?.absoluteString == "https://unit.test/api/v1/stream")
     }
 
+    @Test("stream() throws invalidResponse when the head is not HTTP")
+    func nonHTTPResponseThrowsInvalidResponse() async throws {
+        final class NonHTTPSession: URLSessionStreamingProtocol, @unchecked Sendable {
+            func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse) {
+                let response = URLResponse(
+                    url: request.url!, mimeType: nil, expectedContentLength: 0, textEncodingName: nil
+                )
+                let empty = AsyncThrowingStream<UInt8, Error> { $0.finish() }
+                return (empty, response)
+            }
+        }
+        let manager = NetworkManager(
+            baseURL: URL(string: "https://unit.test")!,
+            streamingSession: NonHTTPSession()
+        )
+        await #expect(throws: StreamingError.invalidResponse) {
+            _ = try await manager.stream(StreamRequest(), accessToken: nil)
+        }
+    }
+
     @Test("ndjson() decodes one JSON object per line")
     func decodesNDJSON() async throws {
         let payload = """
@@ -304,5 +324,52 @@ struct StreamingTests {
         // the assertion is purely structural.
         let manager = NetworkManager(baseURL: URL(string: "https://unit.test")!)
         #expect(manager.streamingSession is URLSession)
+    }
+}
+
+// MARK: - Real URLSession.byteStream bridging
+
+/// `URLProtocol` stub that delivers a synthetic response head, then either streams a fixed
+/// body to EOF or fails mid-stream. Lets the real `URLSession.byteStream(for:)` bridging task
+/// run end-to-end without hitting the network.
+private final class ByteStreamStubProtocol: URLProtocol {
+    nonisolated(unsafe) static var body = Data()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+private func makeByteStreamStubSession() -> URLSession {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [ByteStreamStubProtocol.self]
+    return URLSession(configuration: config)
+}
+
+@Suite("URLSession.byteStream default conformance")
+struct URLSessionByteStreamTests {
+
+    @Test("byteStream yields every body byte and finishes on EOF")
+    func byteStreamHappyPath() async throws {
+        ByteStreamStubProtocol.body = Data("hello".utf8)
+        let session = makeByteStreamStubSession()
+
+        let (stream, response) = try await session.byteStream(
+            for: URLRequest(url: URL(string: "https://stub.test/x")!)
+        )
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+
+        var received: [UInt8] = []
+        for try await byte in stream { received.append(byte) }
+        #expect(received == Array("hello".utf8))
     }
 }

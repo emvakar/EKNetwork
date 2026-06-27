@@ -1126,6 +1126,20 @@ func testPercentEncodedPathPreservesSlashes() async throws {
 }
 
 @MainActor
+@Test("path with traversal segment is rejected as invalid URL")
+func testPathTraversalRejected() async throws {
+    struct TraversalRequest: NetworkRequest {
+        typealias Response = MockResponse
+        var path: String { "/api/v4/../secret" }
+        var method: HTTPMethod { .get }
+    }
+    let manager = NetworkManager(baseURL: { URL(string: "https://gitlab.test")! }, session: CapturingSession(box: URLBox()))
+    await #expect(throws: NetworkError.invalidURL) {
+        _ = try await manager.send(TraversalRequest(), accessToken: nil)
+    }
+}
+
+@MainActor
 @Test("default path (not percent-encoded) keeps appendingPathComponent behaviour")
 func testDefaultPathBehaviourUnchanged() async throws {
     struct PlainRequest: NetworkRequest {
