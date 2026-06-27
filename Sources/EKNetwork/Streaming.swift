@@ -292,7 +292,9 @@ extension NetworkManager: NetworkStreaming {
         let statusCode = httpResponse.statusCode
 
         // 401 — refresh once and retry (only if the upstream has not yet started streaming body).
-        if statusCode == 401, request.allowsRetry, allowRefreshRetry {
+        // Only when a tokenRefresher is configured: without one the retry is identical to the
+        // first request and yields a guaranteed second 401 — a useless round-trip. Mirrors `send`.
+        if statusCode == 401, request.allowsRetry, allowRefreshRetry, tokenRefresher != nil {
             // Drain bytes (small payload expected for 401) so the connection is released cleanly.
             _ = try? await Self.drain(bytes: bytes, limit: Self.maxErrorPayloadBytes)
             try await refreshTokenIfNeeded()

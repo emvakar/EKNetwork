@@ -432,6 +432,116 @@ struct StreamingTests {
         let manager = NetworkManager(baseURL: URL(string: "https://unit.test")!)
         #expect(manager.streamingSession is URLSession)
     }
+
+    // MARK: - Fix B regression: no extra 401 round-trip when tokenRefresher == nil
+
+    /// Counting streaming session that records how many times `byteStream` is invoked and
+    /// always returns the same HTTP status with the given body.
+    private final class CountingStreamingSession: URLSessionStreamingProtocol, @unchecked Sendable {
+        let statusCode: Int
+        let body: Data
+        private let lock = NSLock()
+        private var _calls = 0
+        var calls: Int { lock.withLock { _calls } }
+
+        init(statusCode: Int, body: Data = Data()) {
+            self.statusCode = statusCode
+            self.body = body
+        }
+
+        func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse) {
+            lock.withLock { _calls += 1 }
+            let url = request.url!
+            let response = HTTPURLResponse(url: url, statusCode: statusCode, httpVersion: "HTTP/1.1", headerFields: nil)!
+            let body = self.body
+            let stream = AsyncThrowingStream<UInt8, Error>(UInt8.self) { continuation in
+                for byte in body { continuation.yield(byte) }
+                continuation.finish()
+            }
+            return (stream, response)
+        }
+    }
+
+    @Test("Fix B: stream() 401 with tokenRefresher == nil makes exactly one call and throws unauthorized")
+    func stream401NoRefresherSingleCall() async throws {
+        let session = CountingStreamingSession(statusCode: 401)
+        let manager = NetworkManager(
+            baseURL: URL(string: "https://unit.test")!,
+            streamingSession: session
+        )
+        // tokenRefresher intentionally left nil.
+        do {
+            _ = try await manager.stream(StreamRequest(), accessToken: { "stale" })
+            Issue.record("Expected NetworkError.unauthorized")
+        } catch NetworkError.unauthorized {
+            // Expected: no refresh path, immediate unauthorized.
+        }
+        #expect(session.calls == 1, "Without a tokenRefresher the 401 must NOT trigger a second round-trip")
+    }
+
+    @Test("Fix B: stream() 401 with tokenRefresher == nil and errorDecoder throws custom error, one call")
+    func stream401NoRefresherCustomError() async throws {
+        struct ServerError: Error, Equatable { let code: String }
+        struct DecoderRequest: NetworkRequest {
+            typealias Response = EmptyResponse
+            var path: String { "/decode-401" }
+            var method: HTTPMethod { .get }
+            var errorDecoder: ((Data) -> Error?)? { { _ in ServerError(code: "EXPIRED") } }
+        }
+        let session = CountingStreamingSession(statusCode: 401, body: Data("{\"code\":\"EXPIRED\"}".utf8))
+        let manager = NetworkManager(
+            baseURL: URL(string: "https://unit.test")!,
+            streamingSession: session
+        )
+        // tokenRefresher intentionally left nil.
+        do {
+            _ = try await manager.stream(DecoderRequest(), accessToken: { "stale" })
+            Issue.record("Expected custom ServerError")
+        } catch let error as ServerError {
+            #expect(error == ServerError(code: "EXPIRED"))
+        }
+        #expect(session.calls == 1, "errorDecoder path must still issue exactly one round-trip when refresher is nil")
+    }
+
+    @Test("Fix B regression: stream() 401 with refresher does exactly one refresh + one retry")
+    func stream401WithRefresherSingleRefreshSingleRetry() async throws {
+        final class StagedSession: URLSessionStreamingProtocol, @unchecked Sendable {
+            private let lock = NSLock()
+            private var _calls = 0
+            var calls: Int { lock.withLock { _calls } }
+            func byteStream(for request: URLRequest) async throws -> (AsyncThrowingStream<UInt8, Error>, URLResponse) {
+                let isFirst = lock.withLock { _calls += 1; return _calls == 1 }
+                let url = request.url!
+                let response = HTTPURLResponse(url: url, statusCode: isFirst ? 401 : 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+                let body = isFirst ? Data() : Data("{\"id\":7,\"name\":\"ok\"}\n".utf8)
+                let stream = AsyncThrowingStream<UInt8, Error>(UInt8.self) { continuation in
+                    for byte in body { continuation.yield(byte) }
+                    continuation.finish()
+                }
+                return (stream, response)
+            }
+        }
+        final class Refresher: TokenRefreshProvider, @unchecked Sendable {
+            var refreshes = 0
+            func refreshTokenIfNeeded() async throws { refreshes += 1 }
+        }
+
+        let session = StagedSession()
+        let refresher = Refresher()
+        let manager = NetworkManager(
+            baseURL: URL(string: "https://unit.test")!,
+            streamingSession: session
+        )
+        manager.tokenRefresher = refresher
+
+        let response = try await manager.stream(StreamRequest(), accessToken: { "stale" })
+        var items: [StreamItem] = []
+        for try await item in response.ndjson(as: StreamItem.self) { items.append(item) }
+
+        #expect(session.calls == 2, "Exactly one refresh + one retry — no double round-trip")
+        #expect(refresher.refreshes == 1, "Refresh must happen exactly once (no double refresh)")
+        #expect(items == [StreamItem(id: 7, name: "ok")])
+    }
 }
 
 // MARK: - Real URLSession.byteStream bridging

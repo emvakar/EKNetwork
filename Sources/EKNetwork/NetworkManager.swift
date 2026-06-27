@@ -792,7 +792,10 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
             // Handle HTTP 401 Unauthorized response.
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
                 // Check if the request allows retry and if retries are allowed for this attempt.
-                if request.allowsRetry, shouldRetry {
+                // Only refresh+retry when a tokenRefresher is configured — otherwise the retry
+                // would be byte-for-byte identical and produce a guaranteed second 401 (useless
+                // round-trip). Without a refresher, fall through to error handling immediately.
+                if request.allowsRetry, shouldRetry, tokenRefresher != nil {
                     // Attempt to refresh the token. If successful, retry the request once.
                     // Note: shouldRetry is set to false to prevent infinite retry loops.
                     // The attempt count is not incremented here as this is a token refresh retry,

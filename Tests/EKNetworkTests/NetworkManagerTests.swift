@@ -1208,3 +1208,93 @@ func testGlobalDecoderOverrideEmptyBodyFallsBack() async throws {
     _ = try await manager.send(EmptyBodyRequest(), accessToken: nil)
     #expect(callBox.calls == 1, "override provider is resolved once but its decode() is skipped for empty body")
 }
+
+// MARK: - Fix B regression: no extra 401 round-trip when tokenRefresher == nil
+
+/// Counting `URLSessionProtocol` mock: records how many times `data(for:)` is invoked and always
+/// returns the configured HTTP status with the given body. Used to assert the *exact* number of
+/// network round-trips on a 401 with/without a tokenRefresher.
+private final class CountingSession: URLSessionProtocol, @unchecked Sendable {
+    let statusCode: Int
+    let body: Data
+    private let lock = NSLock()
+    private var _calls = 0
+    var calls: Int { lock.withLock { _calls } }
+
+    init(statusCode: Int, body: Data = Data()) {
+        self.statusCode = statusCode
+        self.body = body
+    }
+
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        lock.withLock { _calls += 1 }
+        let response = HTTPURLResponse(url: request.url!, statusCode: statusCode, httpVersion: nil, headerFields: nil)!
+        return (body, response)
+    }
+}
+
+@Test("Fix B: send() 401 with tokenRefresher == nil makes exactly one call and throws unauthorized")
+func testSend401NoRefresherSingleCall() async throws {
+    let session = CountingSession(statusCode: 401)
+    let manager = NetworkManager(baseURL: { URL(string: "https://unit.test")! }, session: session)
+    // tokenRefresher intentionally left nil.
+    do {
+        _ = try await manager.send(MockRequest(), accessToken: { "stale" })
+        Issue.record("Expected NetworkError.unauthorized")
+    } catch NetworkError.unauthorized {
+        // Expected: without a refresher the 401 short-circuits to unauthorized.
+    }
+    #expect(session.calls == 1, "Without a tokenRefresher the 401 must NOT trigger a second round-trip")
+}
+
+@Test("Fix B: send() 401 with tokenRefresher == nil and errorDecoder throws custom error, one call")
+func testSend401NoRefresherCustomError() async throws {
+    struct ServerError: Error, Equatable { let code: String }
+    struct DecoderRequest: NetworkRequest {
+        typealias Response = MockResponse
+        var path: String { "/decode-401" }
+        var method: HTTPMethod { .get }
+        var errorDecoder: ((Data) -> Error?)? { { _ in ServerError(code: "EXPIRED") } }
+    }
+    let session = CountingSession(statusCode: 401, body: Data("{\"code\":\"EXPIRED\"}".utf8))
+    let manager = NetworkManager(baseURL: { URL(string: "https://unit.test")! }, session: session)
+    // tokenRefresher intentionally left nil.
+    do {
+        _ = try await manager.send(DecoderRequest(), accessToken: { "stale" })
+        Issue.record("Expected custom ServerError")
+    } catch let error as ServerError {
+        #expect(error == ServerError(code: "EXPIRED"))
+    }
+    #expect(session.calls == 1, "errorDecoder path must still issue exactly one round-trip when refresher is nil")
+}
+
+@Test("Fix B regression: send() 401 with refresher does exactly one refresh + one retry")
+func testSend401WithRefresherSingleRefreshSingleRetry() async throws {
+    final class StagedSession: URLSessionProtocol, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _calls = 0
+        var calls: Int { lock.withLock { _calls } }
+        func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+            let isFirst = lock.withLock { _calls += 1; return _calls == 1 }
+            let status = isFirst ? 401 : 200
+            let body = isFirst ? Data() : (try! JSONEncoder().encode(MockResponse(value: "after-refresh")))
+            let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!
+            return (body, response)
+        }
+    }
+    final class CountingRefresher: TokenRefreshProvider, @unchecked Sendable {
+        var refreshes = 0
+        func refreshTokenIfNeeded() async throws { refreshes += 1 }
+    }
+
+    let session = StagedSession()
+    let refresher = CountingRefresher()
+    let manager = NetworkManager(baseURL: { URL(string: "https://unit.test")! }, session: session)
+    manager.tokenRefresher = refresher
+
+    let result = try await manager.send(MockRequest(), accessToken: { "stale" })
+
+    #expect(result == MockResponse(value: "after-refresh"))
+    #expect(session.calls == 2, "Exactly one refresh + one retry — no double round-trip")
+    #expect(refresher.refreshes == 1, "Refresh must happen exactly once (no double refresh)")
+}

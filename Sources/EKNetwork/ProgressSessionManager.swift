@@ -128,13 +128,53 @@ enum ProgressSessionManager {
         URLSession(configuration: configuration, delegate: delegateManager, delegateQueue: nil)
     }
 
+    /// Thread-safe holder for the in-flight `URLSessionTask`. Lets the task-cancellation handler
+    /// cancel the task even if cancellation arrives before the task is created (we then record the
+    /// cancellation and cancel as soon as the task is set).
+    private final class TaskHolder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: URLSessionTask?
+        private var cancelled = false
+
+        /// Stores the task. If cancellation already arrived, cancels it immediately.
+        func set(_ newTask: URLSessionTask) {
+            lock.lock()
+            let shouldCancel = cancelled
+            task = newTask
+            lock.unlock()
+            if shouldCancel { newTask.cancel() }
+        }
+
+        /// Marks as cancelled and cancels the task if it already exists.
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            let current = task
+            lock.unlock()
+            current?.cancel()
+        }
+    }
+
     static func execute(request: URLRequest, progress: NetworkProgress) async throws -> (Data, URLResponse) {
         let sessionToUse = _testSession ?? session
-        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
-            let task = sessionToUse.dataTask(with: request)
-            let ctx = ProgressTaskContext(progress: progress, continuation: continuation)
-            delegateManager.register(key: ProgressContextKey(session: sessionToUse, task: task), context: ctx)
-            task.resume()
+        let holder = TaskHolder()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
+                // If the surrounding Task is already cancelled, bail out before touching the network.
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                let task = sessionToUse.dataTask(with: request)
+                let ctx = ProgressTaskContext(progress: progress, continuation: continuation)
+                delegateManager.register(key: ProgressContextKey(session: sessionToUse, task: task), context: ctx)
+                // Publish the task before resuming so a concurrent cancellation can reach it.
+                // URLSession will resolve the continuation via didCompleteWithError(cancellation).
+                holder.set(task)
+                task.resume()
+            }
+        } onCancel: {
+            holder.cancel()
         }
     }
 }

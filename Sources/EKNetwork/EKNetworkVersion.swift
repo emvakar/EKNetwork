@@ -58,9 +58,11 @@ enum EKNetworkVersion {
     }()
     
     /// Tries to get git version from the framework's directory or current directory
-    /// Note: Only works on macOS and Linux, not available on iOS/watchOS/tvOS
+    /// Note: Only works on macOS and Linux in DEBUG builds. In release builds this always
+    /// returns `nil` so no `/usr/bin/git` process is spawned from the app bundle directory
+    /// (App Sandbox / hardened runtime safety; release.sh always embeds Version.swift anyway).
     private static func getGitVersion(from frameworkPath: String?) -> String? {
-        #if os(macOS) || os(Linux)
+        #if DEBUG && (os(macOS) || os(Linux))
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["describe", "--tags", "--abbrev=0"]
@@ -102,8 +104,8 @@ enum EKNetworkVersion {
         } catch {
             // Silent fail - will use fallback
         }
-        #endif // os(macOS) || os(Linux)
-        
+        #endif // DEBUG && (os(macOS) || os(Linux))
+
         return nil
     }
 }
