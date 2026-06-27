@@ -5,11 +5,11 @@
 **A modern, type-safe HTTP networking library for Swift**
 
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-iOS%2015%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml/badge.svg)](https://github.com/emvakar/EKNetwork/actions/workflows/swift.yml)
-[![Tests](https://img.shields.io/badge/Tests-170%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
-[![Coverage](https://img.shields.io/badge/Coverage-99.13%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-198%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.29%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *A lightweight, type-safe HTTP networking library for Swift applications*
 
@@ -88,7 +88,7 @@ struct GetUserRequest: NetworkRequest {
 ```
 
 #### 🧪 Full Test Coverage
-175 tests cover all major use cases, including edge cases. Code coverage is **98%+** (CI-enforced minimum 98%).
+198 tests cover all major use cases, including edge cases. Code coverage is **99%+** (CI-enforced minimum 99%).
 
 ---
 
@@ -772,7 +772,7 @@ func testSignIn() async throws {
 
 ## 🧪 Testing
 
-EKNetwork has comprehensive test coverage (175 tests, 98%+ code coverage) and provides protocols for easy testing:
+EKNetwork has comprehensive test coverage (198 tests, 99%+ code coverage) and provides protocols for easy testing:
 
 - ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query parameters
@@ -804,7 +804,7 @@ This will:
 1. Run tests with coverage enabled
 2. Generate a coverage report
 3. Display coverage percentage
-4. Check if coverage meets the 98% requirement
+4. Check if coverage meets the 99% requirement
 
 Run `./scripts/coverage.sh` for detailed coverage; see script and CI for thresholds.
 

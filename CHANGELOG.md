@@ -7,6 +7,20 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 **Legend:** ✨ Added · ⚡ Improved · 🐛 Fixed · 🔄 Changed · ⚠️ Breaking · 🧪 Tests · 📝 Docs · 🔧 Infrastructure · 🚀 Migration · 📊 Technical details
 
+## [1.6.2] - 2026-06-27
+
+### 🔒 Security
+- **Percent-encoded path traversal is now rejected.** When a request opts into `pathIsPercentEncoded`, encoded `..` sequences (`%2e%2e`, including double-encoded forms) can no longer escape the base path. Legitimate encoded segments such as `%2F` inside a single path component (e.g. GitLab file paths) keep working unchanged.
+- **Request headers can no longer inject extra HTTP lines.** Header values — including the `Authorization` token — that contain carriage-return or line-feed characters are now stripped before the request is sent, closing a CRLF header-injection vector.
+
+### 🐛 Fixed
+- **Concurrent progress requests no longer interfere with each other.** Upload/download progress is now tracked per `URLSession`, so running several sessions at the same time can no longer mix up their task contexts.
+- **No redundant request on HTTP 401 without a token refresher.** When no token refresher is configured, an unauthorized response now surfaces immediately instead of triggering an extra round-trip.
+- **In-flight progress requests honour cancellation.** Cancelling the awaiting task now cancels the underlying upload/download instead of leaving it hanging until the network finishes.
+
+### 🔄 Changed
+- **Git-tag version resolution runs only in DEBUG builds.** Shipped (release) apps no longer spawn `/usr/bin/git` to determine the embedded EKNetwork version; the resolution chain falls back to the embedded version metadata instead.
+
 ## [1.6.1] - 2026-06-27
 
 ### 🐛 Fixed

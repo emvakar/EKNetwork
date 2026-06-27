@@ -3,10 +3,10 @@
 **Современная типобезопасная HTTP библиотека для Swift**
 
 [![Swift](https://img.shields.io/badge/Swift-6.0-orange.svg)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Platform-iOS%2018%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
+[![Platform](https://img.shields.io/badge/Platform-iOS%2015%2B%20%7C%20macOS%2015%2B-lightgrey.svg)](https://swift.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-170%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
-[![Coverage](https://img.shields.io/badge/Coverage-99.13%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Tests](https://img.shields.io/badge/Tests-198%20passed-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
+[![Coverage](https://img.shields.io/badge/Coverage-99.29%25-brightgreen.svg)](https://github.com/emvakar/EKNetwork/actions)
 
 *Легковесная, типобезопасная библиотека для работы с HTTP в Swift приложениях*
 
@@ -81,7 +81,7 @@ struct GetUserRequest: NetworkRequest {
 ```
 
 #### 🧪 Полное тестовое покрытие
-21 тест покрывает все основные сценарии использования, включая edge cases.
+198 тестов покрывают все основные сценарии использования, включая edge cases. Покрытие кода **99%+** (минимум 99%, проверяется в CI).
 
 ---
 
@@ -730,7 +730,7 @@ func testSignIn() async throws {
 
 ## 🧪 Тестирование
 
-EKNetwork имеет полное тестовое покрытие (21 тест) и предоставляет протоколы для легкого тестирования:
+EKNetwork имеет полное тестовое покрытие (198 тестов, 99%+) и предоставляет протоколы для легкого тестирования:
 
 - ✅ Все HTTP методы (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query параметры
