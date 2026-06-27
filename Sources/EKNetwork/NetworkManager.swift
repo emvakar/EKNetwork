@@ -91,11 +91,33 @@ public struct UserAgentConfiguration {
 }
 
 /// Normalizes request path: trims slashes, collapses "//", and rejects ".." (path traversal).
+///
+/// For `percentEncoded` paths the literal `..` check is insufficient: a payload such as
+/// `repository/files/%2e%2e%2f%2e%2e%2fadmin` survives verbatim into `percentEncodedPath`, and the
+/// server decodes `%2e%2e%2f` → `../`, reopening traversal. Because the separators may themselves be
+/// encoded (`%2f`), a literal-`/` split sees the whole tail as one segment, so we instead decode the
+/// **entire** path and split the decoded form on `/`. Decoding is repeated until it stabilizes
+/// (capped at 5 passes) to also catch double-encoding such as `%252e%252e`. Any decoded segment
+/// equal to `..` rejects the path. Legitimate `%2F` inside a segment (GitLab `file_path`,
+/// e.g. `repository/files/path%2Fto%2Ffile/raw`) only affects this *validation* view — the original
+/// percent-encoded path is still used verbatim by `makeBaseComponents`, so `%2F` is preserved.
 /// - Returns: Normalized path (e.g. "/users" or "/"), or nil if path is invalid (e.g. contains "..").
-private func normalizePath(_ path: String) -> String? {
+private func normalizePath(_ path: String, percentEncoded: Bool = false) -> String? {
     var p = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     while p.contains("//") { p = p.replacingOccurrences(of: "//", with: "/") }
     if p.contains("..") { return nil }
+    if percentEncoded {
+        // Fully decode the path (iteratively, to defeat double-encoding) and split the decoded
+        // string on "/" so encoded separators ("%2f") are resolved before the ".." check.
+        var decoded = p
+        for _ in 0..<5 {
+            guard let next = decoded.removingPercentEncoding, next != decoded else { break }
+            decoded = next
+        }
+        for segment in decoded.split(separator: "/", omittingEmptySubsequences: false) {
+            if segment == ".." { return nil }
+        }
+    }
     return p.isEmpty ? "/" : "/" + p
 }
 
@@ -583,7 +605,7 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     /// Builds the request URL by normalizing the path, appending it to the base URL, and adding query parameters.
     /// Visibility is `internal` so streaming extensions in the same module can reuse the exact URL pipeline.
     func buildRequestURL<T: NetworkRequest>(_ request: T) throws -> URL {
-        guard let normalizedPath = normalizePath(request.path) else {
+        guard let normalizedPath = normalizePath(request.path, percentEncoded: request.pathIsPercentEncoded) else {
             throw NetworkError.invalidURL
         }
         guard var urlComponents = makeBaseComponents(
@@ -622,25 +644,37 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
     /// Applies default headers, authentication, Accept, and User-Agent to the request.
     /// Visibility is `internal` so streaming extensions in the same module can reuse the exact header pipeline.
     func applyCommonHeaders<T: NetworkRequest>(to urlRequest: inout URLRequest, request: T, accessToken: (() -> String?)?) {
+        /// Drops any header whose name or value carries CR/LF (or a bare CR/LF) to prevent header
+        /// injection / response splitting. Logs a warning without disclosing the offending value.
+        func setSafe(_ value: String, forHTTPHeaderField key: String) {
+            let crlf = CharacterSet(charactersIn: "\r\n")
+            guard key.rangeOfCharacter(from: crlf) == nil,
+                  value.rangeOfCharacter(from: crlf) == nil else {
+                logger.warning("Dropped header with CR/LF control characters: \(key, privacy: .public)")
+                return
+            }
+            urlRequest.setValue(value, forHTTPHeaderField: key)
+        }
+
         if let headers = request.headers {
             for (key, value) in headers {
-                urlRequest.setValue(value, forHTTPHeaderField: key)
+                setSafe(value, forHTTPHeaderField: key)
             }
         }
 
         if let accessToken = accessToken?(),
            urlRequest.value(forHTTPHeaderField: "Authorization") == nil {
-            urlRequest.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            setSafe("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         }
 
         if request.contentType.contains("application/json"),
            urlRequest.value(forHTTPHeaderField: "Accept") == nil {
-            urlRequest.setValue("application/json", forHTTPHeaderField: "Accept")
+            setSafe("application/json", forHTTPHeaderField: "Accept")
         }
 
         if let userAgentConfig = userAgentConfiguration,
            urlRequest.value(forHTTPHeaderField: "User-Agent") == nil {
-            urlRequest.setValue(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
+            setSafe(userAgentConfig.generateUserAgentString(), forHTTPHeaderField: "User-Agent")
         }
     }
 

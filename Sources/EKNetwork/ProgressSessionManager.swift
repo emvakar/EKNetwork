@@ -21,6 +21,20 @@ private final class ProgressTaskContext: @unchecked Sendable {
     }
 }
 
+/// Composite key for the delegate context table. `taskIdentifier` is only unique within a single
+/// `URLSession`; when several sessions share one delegate (e.g. the shared `session` plus a test
+/// session) their identifiers collide. Pairing it with `ObjectIdentifier(session)` keeps contexts
+/// isolated per session.
+private struct ProgressContextKey: Hashable {
+    let session: ObjectIdentifier
+    let taskId: Int
+
+    init(session: URLSession, task: URLSessionTask) {
+        self.session = ObjectIdentifier(session)
+        self.taskId = task.taskIdentifier
+    }
+}
+
 private final class ProgressDelegateManager: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate, @unchecked Sendable {
     private static let fallbackURL: URL = {
         if let url = URL(string: "about:blank") {
@@ -29,24 +43,25 @@ private final class ProgressDelegateManager: NSObject, URLSessionDataDelegate, U
         return URL(fileURLWithPath: "/")
     }()
     private let lock = NSLock()
-    private var contexts: [Int: ProgressTaskContext] = [:]
+    private var contexts: [ProgressContextKey: ProgressTaskContext] = [:]
 
-    func register(taskId: Int, context: ProgressTaskContext) {
+    func register(key: ProgressContextKey, context: ProgressTaskContext) {
         lock.lock()
         defer { lock.unlock() }
-        contexts[taskId] = context
+        contexts[key] = context
     }
 
-    func unregister(taskId: Int) -> ProgressTaskContext? {
+    func unregister(key: ProgressContextKey) -> ProgressTaskContext? {
         lock.lock()
         defer { lock.unlock() }
-        return contexts.removeValue(forKey: taskId)
+        return contexts.removeValue(forKey: key)
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
         guard totalBytesExpectedToSend > 0 else { return }
+        let key = ProgressContextKey(session: session, task: task)
         lock.lock()
-        let ctx = contexts[task.taskIdentifier]
+        let ctx = contexts[key]
         lock.unlock()
         guard let ctx else { return }
         let fraction = Double(totalBytesSent) / Double(totalBytesExpectedToSend)
@@ -56,15 +71,17 @@ private final class ProgressDelegateManager: NSObject, URLSessionDataDelegate, U
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        let key = ProgressContextKey(session: session, task: dataTask)
         lock.lock()
-        contexts[dataTask.taskIdentifier]?.response = response
+        contexts[key]?.response = response
         lock.unlock()
         completionHandler(.allow)
     }
 
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        let key = ProgressContextKey(session: session, task: dataTask)
         lock.lock()
-        if let ctx = contexts[dataTask.taskIdentifier] {
+        if let ctx = contexts[key] {
             ctx.data.append(data)
             let expected = dataTask.countOfBytesExpectedToReceive
             if expected > 0 {
@@ -82,7 +99,7 @@ private final class ProgressDelegateManager: NSObject, URLSessionDataDelegate, U
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let ctx = unregister(taskId: task.taskIdentifier) else { return }
+        guard let ctx = unregister(key: ProgressContextKey(session: session, task: task)) else { return }
         if let error = error {
             ctx.continuation.resume(throwing: error)
             return
@@ -116,7 +133,7 @@ enum ProgressSessionManager {
         return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, URLResponse), Error>) in
             let task = sessionToUse.dataTask(with: request)
             let ctx = ProgressTaskContext(progress: progress, continuation: continuation)
-            delegateManager.register(taskId: task.taskIdentifier, context: ctx)
+            delegateManager.register(key: ProgressContextKey(session: sessionToUse, task: task), context: ctx)
             task.resume()
         }
     }

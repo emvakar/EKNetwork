@@ -316,6 +316,113 @@ struct StreamingTests {
         }
     }
 
+    @Test("401 with allowsRetry=false and errorDecoder throws the custom error")
+    func customErrorDecoderOn401WithoutRetry() async throws {
+        // Reaches the `statusCode == 401` branch in performStream where refresh-retry is NOT
+        // allowed (allowsRetry == false) and an errorDecoder is provided → the custom error is
+        // thrown instead of NetworkError.unauthorized (Streaming.swift line 307).
+        struct ServerError: Error, Equatable { let code: String }
+        struct NoRetryDecoderRequest: NetworkRequest {
+            typealias Response = EmptyResponse
+            var path: String { "/decode-401" }
+            var method: HTTPMethod { .get }
+            var allowsRetry: Bool { false }
+            var errorDecoder: ((Data) -> Error?)? {
+                { _ in ServerError(code: "TOKEN_EXPIRED") }
+            }
+        }
+        let mock = MockStreamingSession(response: .init(
+            statusCode: 401,
+            headers: [:],
+            chunks: [Data("{\"code\":\"TOKEN_EXPIRED\"}".utf8)],
+            error: nil
+        ))
+        let manager = NetworkManager(
+            baseURL: URL(string: "https://unit.test")!,
+            streamingSession: mock
+        )
+
+        do {
+            _ = try await manager.stream(NoRetryDecoderRequest(), accessToken: nil)
+            Issue.record("Expected ServerError from custom decoder on 401")
+        } catch let error as ServerError {
+            #expect(error.code == "TOKEN_EXPIRED")
+        }
+    }
+
+    @Test("non-2xx error payload larger than 1 MiB throws errorPayloadTooLarge")
+    func errorPayloadTooLargeOnNonSuccess() async throws {
+        // The drain() helper caps the buffered error payload at maxErrorPayloadBytes (1 MiB).
+        // A non-2xx response whose body exceeds the cap must throw StreamingError
+        // .errorPayloadTooLarge (Streaming.swift line 348). The payload is built lazily inside
+        // the mock so we don't materialise > 1 MiB of Data up front needlessly — but a single
+        // Data over the limit is sufficient and simplest.
+        let limit = 1 * 1024 * 1024
+        let oversized = Data(repeating: 0x41, count: limit + 16) // 1 MiB + 16 bytes
+        let mock = MockStreamingSession(response: .init(
+            statusCode: 500,
+            headers: [:],
+            chunks: [oversized],
+            error: nil
+        ))
+        let manager = NetworkManager(
+            baseURL: URL(string: "https://unit.test")!,
+            streamingSession: mock
+        )
+
+        await #expect(throws: StreamingError.errorPayloadTooLarge(limitBytes: limit)) {
+            _ = try await manager.stream(StreamRequest(), accessToken: nil)
+        }
+    }
+
+    @Test("byteStream/lines/ndjson propagate a mid-stream error")
+    func midStreamErrorPropagates() async throws {
+        struct MidStreamError: Error {}
+
+        func makeManager() -> NetworkManager {
+            let mock = MockStreamingSession(response: .init(
+                statusCode: 200,
+                headers: [:],
+                // Several valid NDJSON lines, then the stream fails mid-flight.
+                chunks: [Data("{\"id\":1,\"name\":\"a\"}\n{\"id\":2,\"name\":\"b\"}\n".utf8)],
+                error: MidStreamError()
+            ))
+            return NetworkManager(
+                baseURL: URL(string: "https://unit.test")!,
+                streamingSession: mock
+            )
+        }
+
+        // Raw bytes stream surfaces the error (Streaming.swift byteStream bridge / consumer).
+        do {
+            let response = try await makeManager().stream(StreamRequest(), accessToken: nil)
+            for try await _ in response.bytes {}
+            Issue.record("Expected raw bytes iteration to throw")
+        } catch is MidStreamError {
+            // expected
+        }
+
+        // lines() forwards the error from its bridging task (Streaming.swift line 173).
+        do {
+            let response = try await makeManager().stream(StreamRequest(), accessToken: nil)
+            var seen: [String] = []
+            for try await line in response.lines() { seen.append(line) }
+            Issue.record("Expected lines() iteration to throw")
+        } catch is MidStreamError {
+            // expected
+        }
+
+        // ndjson() forwards the error from its bridging task (Streaming.swift line 209).
+        do {
+            let response = try await makeManager().stream(StreamRequest(), accessToken: nil)
+            var items: [StreamItem] = []
+            for try await item in response.ndjson(as: StreamItem.self) { items.append(item) }
+            Issue.record("Expected ndjson() iteration to throw")
+        } catch is MidStreamError {
+            // expected
+        }
+    }
+
     @Test("URLSession default conformance is wired without explicit streamingSession")
     func defaultURLSessionStreamingConformance() async throws {
         // Verifies that constructing NetworkManager without a streamingSession parameter is
@@ -355,6 +462,45 @@ private func makeByteStreamStubSession() -> URLSession {
     return URLSession(configuration: config)
 }
 
+/// `URLProtocol` stub that delivers a 200 head, emits some body bytes, then fails the load with a
+/// `URLProtocol` stub that delivers a 200 head, then streams body chunks slowly over time and
+/// never reaches EOF until cancelled. Lets the consumer break out of iteration mid-stream so the
+/// real `URLSession.byteStream(for:)` bridging task hits its `catch` branch via the cooperative
+/// cancellation check (`Task.checkCancellation()` → `continuation.finish(throwing:)`,
+/// Streaming.swift lines 70/75).
+private final class ByteStreamSlowProtocol: URLProtocol {
+    nonisolated(unsafe) static var cancelled = false
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() { Self.cancelled = true }
+
+    override func startLoading() {
+        Self.cancelled = false
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        // Drip a byte at a time on a background queue so the head is delivered up front and the
+        // consumer has time to cancel mid-stream.
+        let queue = DispatchQueue(label: "bytestream.slow")
+        func emit() {
+            queue.asyncAfter(deadline: .now() + 0.005) { [weak self] in
+                guard let self, Self.cancelled == false else { return }
+                self.client?.urlProtocol(self, didLoad: Data([0x41]))
+                emit()
+            }
+        }
+        emit()
+    }
+}
+
+private func makeByteStreamSlowSession() -> URLSession {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [ByteStreamSlowProtocol.self]
+    return URLSession(configuration: config)
+}
+
 @Suite("URLSession.byteStream default conformance")
 struct URLSessionByteStreamTests {
 
@@ -371,5 +517,26 @@ struct URLSessionByteStreamTests {
         var received: [UInt8] = []
         for try await byte in stream { received.append(byte) }
         #expect(received == Array("hello".utf8))
+    }
+
+    @Test("byteStream bridging task finishes (throwing) when iteration is cancelled mid-stream")
+    func byteStreamCancelledMidStream() async throws {
+        let session = makeByteStreamSlowSession()
+
+        let (stream, response) = try await session.byteStream(
+            for: URLRequest(url: URL(string: "https://stub.test/slow")!)
+        )
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+
+        // Consume a few bytes, then break — this triggers `onTermination`, cancelling the bridging
+        // task. The in-flight `for try await byte` then throws from `Task.checkCancellation()`,
+        // routing through the bridge's catch (Streaming.swift line 75). Breaking out of the loop
+        // here exercises that termination path without the test itself throwing.
+        var received = 0
+        for try await _ in stream {
+            received += 1
+            if received >= 3 { break }
+        }
+        #expect(received == 3)
     }
 }

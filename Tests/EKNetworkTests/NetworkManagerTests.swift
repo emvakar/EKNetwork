@@ -1154,3 +1154,57 @@ func testDefaultPathBehaviourUnchanged() async throws {
     let url = try #require(box.get())
     #expect(url.absoluteString == "https://gitlab.test/api/v4/projects/123")
 }
+
+// MARK: - Global decoder override with empty response body (decodeResponse line 850)
+
+@MainActor
+@Test("global decoder override falls back to request decoding for empty body")
+func testGlobalDecoderOverrideEmptyBodyFallsBack() async throws {
+    // When a global responseDecoderProvider is configured AND override is allowed (default),
+    // but the server returns an EMPTY body, decodeResponse must NOT feed the empty data to the
+    // override decoder (which would throw). Instead it preserves per-request empty-response
+    // handling. This exercises the `if data.isEmpty { return try request.decodeResponse(...) }`
+    // branch inside `decodeResponse(data:response:request:)`.
+    struct EmptyBodyRequest: NetworkRequest {
+        typealias Response = EmptyResponse
+        var path: String { "/no-content" }
+        var method: HTTPMethod { .delete }
+        // allowsResponseDecoderOverride defaults to true — override IS allowed,
+        // so we reach the override branch, then the empty-data guard inside it.
+    }
+
+    class EmptyBodyProtocol: URLProtocol {
+        override class func canInit(with request: URLRequest) -> Bool { true }
+        override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+        override func startLoading() {
+            guard let url = request.url else { return }
+            let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data()) // empty body
+            client?.urlProtocolDidFinishLoading(self)
+        }
+        override func stopLoading() {}
+    }
+
+    final class DecoderCallBox: @unchecked Sendable {
+        private(set) var calls = 0
+        func bump() { calls += 1 }
+    }
+    let callBox = DecoderCallBox()
+
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [EmptyBodyProtocol.self]
+    let manager = NetworkManager(
+        baseURL: { URL(string: "https://api.test")! },
+        session: URLSession(configuration: config),
+        responseDecoderProvider: {
+            // If this decoder were used on empty data it would throw; it must NOT be called here.
+            callBox.bump()
+            return JSONDecoder()
+        }
+    )
+
+    // Should succeed via request.decodeResponse (EmptyResponse ignores body), not the override.
+    _ = try await manager.send(EmptyBodyRequest(), accessToken: nil)
+    #expect(callBox.calls == 1, "override provider is resolved once but its decode() is skipped for empty body")
+}

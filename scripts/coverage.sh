@@ -111,10 +111,10 @@ echo "Covered lines:   $COVERED_LINES"
 echo "Coverage:        ${COVERAGE}%"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-if [ "$COVERAGE_INT" -ge 98 ]; then
-    echo "✅ Coverage meets 98% requirement"
+if [ "$COVERAGE_INT" -ge 99 ]; then
+    echo "✅ Coverage meets 99% requirement"
     exit 0
 else
-    echo "❌ Coverage is ${COVERAGE}%, but required minimum is 98%"
+    echo "❌ Coverage is ${COVERAGE}%, but required minimum is 99%"
     exit 1
 fi

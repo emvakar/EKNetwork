@@ -165,11 +165,11 @@ jobs:
         COVERAGE_INT="${{ steps.calc.outputs.coverage_int }}"
         COVERAGE="${{ steps.calc.outputs.coverage }}"
         
-        if [ "$COVERAGE_INT" -lt 98 ]; then
-          echo "❌ Code coverage is ${COVERAGE}%, but required minimum is 98%"
+        if [ "$COVERAGE_INT" -lt 99 ]; then
+          echo "❌ Code coverage is ${COVERAGE}%, but required minimum is 99%"
           exit 1
         else
-          echo "✅ Code coverage is ${COVERAGE}% (meets 98% requirement)"
+          echo "✅ Code coverage is ${COVERAGE}% (meets 99% requirement)"
         fi
     
     - name: Upload coverage report
