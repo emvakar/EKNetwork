@@ -55,7 +55,7 @@ EKNetwork is a **modern, type-safe HTTP networking library** for Swift applicati
 
 ## 📊 Version History & Stability
 
-### Current Version: **1.4.2** (February 2026)
+### Current Version: **1.6.1** (June 2026)
 
 **Version Timeline:**
 - **v1.0.0** (June 2025) - Initial stable release with core features
@@ -66,6 +66,9 @@ EKNetwork is a **modern, type-safe HTTP networking library** for Swift applicati
 - **v1.4.0** - CI/CD, Swift 6.0 full compatibility, Package API updates
 - **v1.4.1** - Base URL as closure, removal of updateBaseURL, @unchecked Sendable
 - **v1.4.2** - Multipart safety, path normalization, NonRetriableError, ProgressSessionManager, file headers
+- **v1.5.0** - Extended HTTP methods, global response decoder override
+- **v1.6.0** - Streaming responses (NDJSON / SSE / chunked transfer)
+- **v1.6.1** - `pathIsPercentEncoded` for pre-encoded path segments (fixes `%2F` double-encoding)
 
 **Stability:** ✅ **Stable** - Ready for production use
 
@@ -80,7 +83,7 @@ EKNetwork is a **modern, type-safe HTTP networking library** for Swift applicati
 ```swift
 // 1. Add to Package.swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.2")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.6.1")
 ]
 
 // 2. Define your request

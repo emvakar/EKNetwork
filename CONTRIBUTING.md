@@ -91,7 +91,14 @@ We welcome enhancement suggestions! Create an issue with:
 
 - Write unit tests for new functionality
 - Use `@testable import EKNetwork` for testing internal components
-- Aim for coverage of all edge cases
+- Aim for coverage of all edge cases — CI enforces a **98% minimum** (`scripts/coverage.sh`)
+
+### Releasing
+
+Releases are automated from version tags. Before tagging, bump
+`Sources/EKNetwork/Version.swift` and add a `CHANGELOG.md` section. The full
+process — tagging, the `release.yml` workflow and the notes generator — is
+described in [docs/Releasing.md](docs/Releasing.md).
 
 ## Questions?
 

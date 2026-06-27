@@ -88,7 +88,7 @@ struct GetUserRequest: NetworkRequest {
 ```
 
 #### 🧪 Full Test Coverage
-115 tests cover all major use cases, including edge cases. Code coverage is 99.42%.
+175 tests cover all major use cases, including edge cases. Code coverage is **98%+** (CI-enforced minimum 98%).
 
 ---
 
@@ -104,7 +104,7 @@ Add EKNetwork to your project dependencies in `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.2")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.6.1")
 ]
 ```
 
@@ -123,7 +123,7 @@ Then add the product to your target:
 
 1. In Xcode, select **File** → **Add Packages...**
 2. Enter the repository URL: `https://github.com/emvakar/EKNetwork.git`
-3. Select **Up to Next Major Version** with `1.4.2`
+3. Select **Up to Next Major Version** with `1.6.1`
 4. Click **Add Package**
 5. Select the `EKNetwork` product and add it to your target
 
@@ -219,12 +219,17 @@ print("User: \(response.user.name)")
 
 ### 📖 API Reference
 
-For complete API documentation, see [API.md](API.md). The API reference includes:
+For complete API documentation, see **[API.md](API.md)** ([на русском](API_RU.md)). The API reference includes:
 - Complete method and property documentation
 - Parameter descriptions
 - Usage examples
 - Error handling details
 - Protocol conformances
+
+**More guides:**
+- 🗂️ [Project structure](PROJECT_STRUCTURE.md)
+- 🚀 [Releasing & versioning](docs/Releasing.md)
+- 📝 [Changelog](CHANGELOG.md)
 
 ### Basic Examples
 
@@ -391,6 +396,48 @@ struct APIError: Decodable, Error {
 ```
 
 ### Advanced Features
+
+#### Streaming Responses (NDJSON / SSE / chunked) — since 1.6.0
+
+Consume responses as bytes arrive, using the same `NetworkRequest` you already define. Great for NDJSON feeds, Server-Sent Events and chunked log/streaming endpoints.
+
+```swift
+struct EventsStream: NetworkRequest {
+    typealias Response = EmptyResponse   // streaming ignores the single-body decode
+    var path: String { "/api/v1/events" }
+    var method: HTTPMethod { .get }
+}
+
+let response = try await manager.stream(EventsStream(), accessToken: { token })
+
+// Decode one JSON object per line:
+for try await event in response.ndjson(as: Event.self) {
+    handle(event)
+}
+// …or read raw UTF-8 lines / bytes:
+// for try await line in response.lines() { … }
+// for try await byte in response.bytes { … }
+```
+
+Headers, authentication, base URL and 401 token-refresh work exactly like `send(_:)`. See [API.md](API.md#streaming-ndjson--sse) for the full surface.
+
+#### Encoded Path Segments (`pathIsPercentEncoded`) — since 1.6.1
+
+When an endpoint expects an **already percent-encoded** path segment (for example `%2F` inside a GitLab `repository/files/:file_path`), set `pathIsPercentEncoded` so EKNetwork preserves it verbatim instead of double-encoding `%` into `%252F`.
+
+```swift
+struct ReadFile: NetworkRequest {
+    typealias Response = FileBlob
+    let projectID: Int
+    let encodedFilePath: String          // e.g. "src%2FApp%2Fmain.swift"
+
+    var path: String { "/api/v4/projects/\(projectID)/repository/files/\(encodedFilePath)" }
+    var pathIsPercentEncoded: Bool { true }
+    var queryParameters: [String: String]? { ["ref": "main"] }
+}
+```
+
+Default is `false`, so existing requests keep the normal `appendingPathComponent` behavior.
 
 #### Custom JSON Encoders/Decoders
 
@@ -725,7 +772,7 @@ func testSignIn() async throws {
 
 ## 🧪 Testing
 
-EKNetwork has comprehensive test coverage (115 tests, 99.42% code coverage) and provides protocols for easy testing:
+EKNetwork has comprehensive test coverage (175 tests, 98%+ code coverage) and provides protocols for easy testing:
 
 - ✅ All HTTP methods (GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS, TRACE, CONNECT)
 - ✅ Query parameters

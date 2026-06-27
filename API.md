@@ -104,12 +104,33 @@ Protocol representing a network request. Conforming types define the request pat
 The expected response type, must conform to `Decodable`.
 
 #### `var path: String { get }`
-The path component appended to the base URL.
+The path component appended to the base URL. By default the path is treated as **not** percent-encoded: it is normalized (leading/trailing slashes trimmed, `//` collapsed, `..` rejected) and joined to the base URL via `appendingPathComponent`. To embed already-encoded reserved characters in the path (for example `%2F` in a GitLab `repository/files/:file_path`), set `pathIsPercentEncoded` to `true` — see below.
 
 #### `var method: HTTPMethod { get }`
 HTTP method for the request.
 
 ### Optional Properties (with defaults)
+
+#### `var pathIsPercentEncoded: Bool { get }`
+Whether `path` is already percent-encoded and must be used verbatim. Defaults to `false`. Added in **1.6.1**.
+
+When `false` (default), the URL is built with `appendingPathComponent`, which re-encodes `%` — so a path segment like `a%2Fb` becomes `a%252Fb`. That is correct for plain paths but breaks endpoints that expect a pre-encoded segment.
+
+When `true`, the path is joined via `percentEncodedPath`, preserving reserved characters such as `%2F` exactly. Use this for APIs that take an encoded resource identifier in the path:
+
+```swift
+struct ReadFileRequest: NetworkRequest {
+    typealias Response = FileBlob
+    let projectID: Int
+    let encodedFilePath: String   // e.g. "src%2FApp%2Fmain.swift"
+
+    var path: String { "/api/v4/projects/\(projectID)/repository/files/\(encodedFilePath)" }
+    var pathIsPercentEncoded: Bool { true }
+    var queryParameters: [String: String]? { ["ref": "main"] }
+}
+```
+
+Existing requests are unaffected: omit the property to keep the legacy behavior.
 
 #### `var headers: [String: String]? { get }`
 Optional HTTP headers to include in the request. Defaults to `nil`.

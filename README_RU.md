@@ -93,7 +93,7 @@ struct GetUserRequest: NetworkRequest {
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.4.2")
+    .package(url: "https://github.com/emvakar/EKNetwork.git", from: "1.6.1")
 ]
 ```
 
@@ -354,6 +354,48 @@ struct APIError: Decodable, Error {
 ```
 
 ### Расширенные возможности
+
+#### Стриминговые ответы (NDJSON / SSE / chunked) — с 1.6.0
+
+Получайте ответ по мере поступления байтов, используя тот же `NetworkRequest`. Подходит для NDJSON-потоков, Server-Sent Events и chunked log/streaming endpoint'ов.
+
+```swift
+struct EventsStream: NetworkRequest {
+    typealias Response = EmptyResponse   // при стриминге одиночный decode тела не используется
+    var path: String { "/api/v1/events" }
+    var method: HTTPMethod { .get }
+}
+
+let response = try await manager.stream(EventsStream(), accessToken: { token })
+
+// По одному JSON-объекту на строку:
+for try await event in response.ndjson(as: Event.self) {
+    handle(event)
+}
+// …либо сырые UTF-8 строки / байты:
+// for try await line in response.lines() { … }
+// for try await byte in response.bytes { … }
+```
+
+Заголовки, аутентификация, base URL и обновление токена на 401 работают так же, как в `send(_:)`. Полное описание — в [API_RU.md](API_RU.md#streaming-ndjson--sse).
+
+#### Закодированные сегменты пути (`pathIsPercentEncoded`) — с 1.6.1
+
+Когда endpoint ожидает **уже percent-encoded** сегмент пути (например `%2F` внутри GitLab `repository/files/:file_path`), задайте `pathIsPercentEncoded`, чтобы EKNetwork сохранил его дословно, а не закодировал `%` повторно в `%252F`.
+
+```swift
+struct ReadFile: NetworkRequest {
+    typealias Response = FileBlob
+    let projectID: Int
+    let encodedFilePath: String          // напр. "src%2FApp%2Fmain.swift"
+
+    var path: String { "/api/v4/projects/\(projectID)/repository/files/\(encodedFilePath)" }
+    var pathIsPercentEncoded: Bool { true }
+    var queryParameters: [String: String]? { ["ref": "main"] }
+}
+```
+
+По умолчанию `false` — существующие запросы сохраняют обычное поведение `appendingPathComponent`.
 
 #### Кастомные JSON кодеры/декодеры
 

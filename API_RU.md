@@ -101,12 +101,33 @@ let response = try await manager.send(
 Ожидаемый тип ответа, должен соответствовать `Decodable`.
 
 #### `var path: String { get }`
-Компонент пути, добавляемый к базовому URL.
+Компонент пути, добавляемый к базовому URL. По умолчанию путь считается **не** percent-encoded: он нормализуется (срезаются ведущие/замыкающие слэши, схлопываются `//`, отклоняются `..`) и присоединяется к базовому URL через `appendingPathComponent`. Чтобы встроить уже закодированные зарезервированные символы (например `%2F` в GitLab `repository/files/:file_path`), задайте `pathIsPercentEncoded = true` — см. ниже.
 
 #### `var method: HTTPMethod { get }`
 HTTP метод для запроса.
 
 ### Опциональные свойства (с значениями по умолчанию)
+
+#### `var pathIsPercentEncoded: Bool { get }`
+Указывает, что `path` уже percent-encoded и должен использоваться как есть. По умолчанию `false`. Добавлено в **1.6.1**.
+
+При `false` (по умолчанию) URL собирается через `appendingPathComponent`, который повторно кодирует `%` — сегмент `a%2Fb` превращается в `a%252Fb`. Это корректно для обычных путей, но ломает endpoint'ы, ожидающие заранее закодированный сегмент.
+
+При `true` путь присоединяется через `percentEncodedPath`, сохраняя зарезервированные символы (`%2F` и т.п.) дословно. Используйте для API, принимающих закодированный идентификатор ресурса в пути:
+
+```swift
+struct ReadFileRequest: NetworkRequest {
+    typealias Response = FileBlob
+    let projectID: Int
+    let encodedFilePath: String   // напр. "src%2FApp%2Fmain.swift"
+
+    var path: String { "/api/v4/projects/\(projectID)/repository/files/\(encodedFilePath)" }
+    var pathIsPercentEncoded: Bool { true }
+    var queryParameters: [String: String]? { ["ref": "main"] }
+}
+```
+
+Существующие запросы не затрагиваются: не задавайте свойство, чтобы сохранить прежнее поведение.
 
 #### `var headers: [String: String]? { get }`
 Опциональные HTTP заголовки для включения в запрос. По умолчанию `nil`.
