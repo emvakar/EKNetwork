@@ -1086,3 +1086,57 @@ func testContentLengthHeader() async throws {
     let length = Int(contentLength) ?? 0
     #expect(length > 0, "Content-Length should be set and greater than 0")
 }
+
+// MARK: - Percent-encoded path
+
+private final class URLBox: @unchecked Sendable {
+    private var value: URL?
+    func set(_ new: URL?) { value = new }
+    func get() -> URL? { value }
+}
+
+private final class CapturingSession: URLSessionProtocol {
+    let box: URLBox
+    init(box: URLBox) { self.box = box }
+    func data(for request: URLRequest) async throws -> (Data, URLResponse) {
+        box.set(request.url)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        return (try JSONEncoder().encode(MockResponse(value: "ok")), response)
+    }
+}
+
+@MainActor
+@Test("pathIsPercentEncoded preserves %2F instead of re-encoding to %252F")
+func testPercentEncodedPathPreservesSlashes() async throws {
+    struct EncodedRequest: NetworkRequest {
+        typealias Response = MockResponse
+        var path: String { "/api/v4/projects/123/repository/files/GLab%2FCore%2FUI%2FRemoteAvatar.swift" }
+        var method: HTTPMethod { .get }
+        var pathIsPercentEncoded: Bool { true }
+        var queryParameters: [String: String]? { ["ref": "main"] }
+    }
+    let box = URLBox()
+    let manager = NetworkManager(baseURL: { URL(string: "https://gitlab.test")! }, session: CapturingSession(box: box))
+    _ = try await manager.send(EncodedRequest(), accessToken: nil)
+
+    let url = try #require(box.get())
+    #expect(url.absoluteString.contains("files/GLab%2FCore%2FUI%2FRemoteAvatar.swift"))
+    #expect(!url.absoluteString.contains("%252F"))
+    #expect(url.absoluteString.contains("ref=main"))
+}
+
+@MainActor
+@Test("default path (not percent-encoded) keeps appendingPathComponent behaviour")
+func testDefaultPathBehaviourUnchanged() async throws {
+    struct PlainRequest: NetworkRequest {
+        typealias Response = MockResponse
+        var path: String { "/api/v4/projects/123" }
+        var method: HTTPMethod { .get }
+    }
+    let box = URLBox()
+    let manager = NetworkManager(baseURL: { URL(string: "https://gitlab.test")! }, session: CapturingSession(box: box))
+    _ = try await manager.send(PlainRequest(), accessToken: nil)
+
+    let url = try #require(box.get())
+    #expect(url.absoluteString == "https://gitlab.test/api/v4/projects/123")
+}

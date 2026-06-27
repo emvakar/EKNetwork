@@ -283,6 +283,12 @@ public protocol NetworkRequest {
 
     /// The path component appended to the base URL.
     var path: String { get }
+    /// Whether `path` is already percent-encoded and must be used verbatim.
+    /// When `true`, the URL is assembled via `percentEncodedPath` instead of
+    /// `appendingPathComponent`, preserving reserved characters such as `%2F`
+    /// (e.g. GitLab `repository/files/:file_path`). `appendingPathComponent`
+    /// re-encodes `%`, turning `%2F` into `%252F`. Defaults to `false`.
+    var pathIsPercentEncoded: Bool { get }
     /// HTTP method for the request.
     var method: HTTPMethod { get }
     /// Optional HTTP headers to include in the request.
@@ -329,6 +335,7 @@ public protocol NetworkRequest {
 
 /// Default implementation
 public extension NetworkRequest {
+    var pathIsPercentEncoded: Bool { false }
     var headers: [String: String]? { nil }
     var queryParameters: [String: String]? { nil }
     var contentType: String { "application/json" }
@@ -579,7 +586,10 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
         guard let normalizedPath = normalizePath(request.path) else {
             throw NetworkError.invalidURL
         }
-        guard var urlComponents = URLComponents(url: baseURL().appendingPathComponent(normalizedPath), resolvingAgainstBaseURL: false) else {
+        guard var urlComponents = makeBaseComponents(
+            path: normalizedPath,
+            percentEncoded: request.pathIsPercentEncoded
+        ) else {
             throw NetworkError.invalidURL
         }
         if let query = request.queryParameters {
@@ -589,6 +599,24 @@ open class NetworkManager: NetworkManaging, @unchecked Sendable {
             throw NetworkError.invalidURL
         }
         return url
+    }
+
+    /// Joins `path` onto the base URL. For `percentEncoded` paths the join uses
+    /// `percentEncodedPath` so reserved characters (e.g. `%2F`) survive verbatim;
+    /// otherwise the legacy `appendingPathComponent` behaviour is preserved.
+    private func makeBaseComponents(path: String, percentEncoded: Bool) -> URLComponents? {
+        let base = baseURL()
+        guard percentEncoded else {
+            return URLComponents(url: base.appendingPathComponent(path), resolvingAgainstBaseURL: false)
+        }
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        let basePath = components.percentEncodedPath.hasSuffix("/")
+            ? String(components.percentEncodedPath.dropLast())
+            : components.percentEncodedPath
+        components.percentEncodedPath = basePath + path
+        return components
     }
 
     /// Applies default headers, authentication, Accept, and User-Agent to the request.
